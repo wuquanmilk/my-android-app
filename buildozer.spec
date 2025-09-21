@@ -7,7 +7,7 @@ source.dir = .
 version = 1.0
 
 # ==================== 依赖配置 ====================
-requirements = python3==3.9.18, kivy, cython==0.29.36  
+requirements = python3==3.9.18, kivy, cython==0.29.36, libffi==3.4.4 
 orientation = portrait
 fullscreen = 0
 
@@ -21,7 +21,8 @@ android.minapi = 21       # 最低支持API级别（Android 5.0）
 android.ndk = 28c         # NDK版本（您指定的r28c）
 android.ndk_api = 21      # NDK使用的API级别
 android.archs = arm64-v8a # 目标架构（64位ARM）
-
+android.use_precompiled = True
+android.precompiled_dir = ./precompiled
 
 # ==================== 高级优化配置 ====================
 # 1. AndroidX 支持（现代架构）
