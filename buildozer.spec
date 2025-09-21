@@ -5,7 +5,7 @@ package.domain = org.example
 source.dir = .
 version = 1.0
 
-requirements = python3==3.11, kivy, cython==0.29.36, libffi==3.4.4
+requirements = python3==3.9, kivy, cython==0.29.36, libffi==3.4.4
 orientation = portrait
 fullscreen = 0
 
