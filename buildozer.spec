@@ -18,9 +18,9 @@ android.api = 31          # 目标API级别（Android 12）
 android.minapi = 21       # 最低支持API级别（Android 5.0）
 
 # NDK和架构配置
-android.ndk = 28c         # NDK版本（您指定的r28c）
-android.ndk_api = 21      # NDK使用的API级别
-android.archs = arm64-v8a # 目标架构（64位ARM）
+android.ndk = 28c         
+android.ndk_api = 21      
+android.archs = arm64-v8a 
 android.use_precompiled = True
 android.precompiled_dir = ./precompiled
 
