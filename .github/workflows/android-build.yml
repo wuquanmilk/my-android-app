@@ -34,5 +34,5 @@ jobs:
       with:
         name: android-apk
         path: bin/*.apk
-- name: Install Buildozer and Cython
-  run: pip install buildozer Cython
+    - name: Install Buildozer and Cython
+      run: pip install buildozer Cython
