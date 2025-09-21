@@ -33,7 +33,7 @@ android.extra_cflags = -O2 -fPIC -DNDEBUG
 android.extra_ldflags = -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384
 
 # 4. 包含所有文件类型
-source.include_exts = py,png,jpg,kv,ttf,otf,json,xml,ttc,woff,woff2
+source.include_exts = py,png,jpg,kv,ttf,otf,json,xml
 
 # 5. 包含资源目录（根据实际情况调整）
 source.include_dirs = fonts, images, data, assets
