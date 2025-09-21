@@ -32,8 +32,8 @@ jobs:
         mkdir -p $NDK_CACHE_PATH
         
         # 使用您提供的官方下载地址
-        NDK_URL="https://dl.google.com/android/repository/android-ndk-r28c-linux-x86_64.zip"
-        NDK_ZIP_PATH="$NDK_CACHE_PATH/android-ndk-r28c-linux-x86_64.zip"
+        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r28c-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/android-ndk-r28c-linux.zip"
         
         echo "Downloading NDK from official source: $NDK_URL"
         
