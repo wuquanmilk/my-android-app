@@ -21,10 +21,13 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y zip unzip openjdk-17-jdk
+        sudo apt-get install -y \
+          zip unzip openjdk-17-jdk \
+          autoconf automake libtool \
+          libffi-dev libssl-dev git wget make
 
-    - name: Install Buildozer
-      run: pip install buildozer
+    - name: Install Buildozer and Cython
+      run: pip install buildozer Cython==0.29.33
 
     - name: Build APK
       run: buildozer android debug
@@ -34,5 +37,3 @@ jobs:
       with:
         name: android-apk
         path: bin/*.apk
-    - name: Install Buildozer and Cython
-      run: pip install buildozer Cython
