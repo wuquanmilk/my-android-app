@@ -1,10 +1,9 @@
 [app]
 # ==================== 基础信息 ====================
 title = 我的应用
-package.name = wangzhanzhida
+package.name = myapp
 package.domain = org.example
 source.dir = .
-source.include_exts = py, kv, png, jpg, jpeg, ttf, atlas
 version = 1.0
 
 # ==================== 依赖配置 ====================
@@ -33,7 +32,7 @@ android.extra_cflags = -O2 -fPIC -DNDEBUG
 android.extra_ldflags = -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384
 
 # 4. 包含所有文件类型
-source.include_exts = py,png,jpg,kv,ttf,otf,json,xml
+source.include_exts = py,png,jpg,kv,ttf,otf,json,xml,ttc,woff,woff2
 
 # 5. 包含资源目录（根据实际情况调整）
 source.include_dirs = fonts, images, data, assets
