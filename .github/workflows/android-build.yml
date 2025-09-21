@@ -25,17 +25,17 @@ jobs:
           autoconf automake libtool \
           libffi-dev libssl-dev
 
-    - name: Download Android NDK r28c (Official)
+    - name: Download Android NDK r28c (Mirror)
       run: |
         # 设置缓存路径
         NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk"
         mkdir -p $NDK_CACHE_PATH
         
-        # 使用您提供的官方下载地址
+        # 使用您提供的镜像地址
         NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r28c-linux.zip"
         NDK_ZIP_PATH="$NDK_CACHE_PATH/android-ndk-r28c-linux.zip"
         
-        echo "Downloading NDK from official source: $NDK_URL"
+        echo "Downloading NDK from mirror: $NDK_URL"
         
         # 增强的重试机制
         for i in {1..5}; do
@@ -57,9 +57,6 @@ jobs:
         # 解压到缓存目录
         echo "Unzipping NDK..."
         unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
-        
-        # 重命名解压后的目录为Buildozer期望的格式
-        mv "$NDK_CACHE_PATH/android-ndk-r28c" "$NDK_CACHE_PATH/android-ndk-r28c"
         
         # 设置环境变量
         echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r28c" >> $GITHUB_ENV
