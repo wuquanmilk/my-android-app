@@ -17,7 +17,12 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
-
+    - name: 设置 Android NDK (使用镜像)
+      run: |
+    NDK_URL="https://repo.huaweicloud.com/android/repository/android-ndk-r28c-linux.zip" # 使用镜像
+    NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk/"
+    mkdir -p $NDK_CACHE_PATH
+    wget --tries=3 --timeout=60 -O $NDK_CACHE_PATH/android-ndk-r28c-linux.zip $NDK_URL || exit 1
     - name: Install system dependencies
       run: |
         sudo apt-get update
