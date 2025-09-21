@@ -1,68 +1,86 @@
 name: Android APK Builder with API 31
 
 on:
-  workflow_dispatch: # 允许手动触发
-  push: # 推送代码时自动触发
+  workflow_dispatch: # Allow manual triggers
+  push: # Auto-trigger on push to main
     branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9' # 使用兼容性好的 Python 3.9
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9' # Stable and compatible version
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget unzip openjdk-17-jdk autoconf automake libtool libffi-dev libssl-dev
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          wget unzip openjdk-17-jdk \
+          autoconf automake libtool \
+          libffi-dev libssl-dev
 
-      - name: Download Android NDK (from mirror with retry)
-        run: |
-          NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk/"
-          mkdir -p $NDK_CACHE_PATH
-          # 使用华为云镜像下载，并设置重试策略
-          wget --tries=3 --timeout=90 -O $NDK_CACHE_PATH/android-ndk-r28c-linux.zip "https://repo.huaweicloud.com/android/repository/android-ndk-r28c-linux.zip" || exit 1
-          # 验证下载文件是否完整（可选但推荐）
-          if [ -f "$NDK_CACHE_PATH/android-ndk-r28c-linux.zip" ]; then
-            echo "NDK downloaded successfully to $NDK_CACHE_PATH"
+    - name: Download Android NDK (Official with robust retry)
+      run: |
+        # Set cache path for Buildozer
+        NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk"
+        mkdir -p $NDK_CACHE_PATH
+        
+        # Official Google NDK URL
+        NDK_URL="https://dl.google.com/android/repository/android-ndk-r28c-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/android-ndk-r28c-linux.zip"
+        
+        echo "Downloading NDK from official source: $NDK_URL"
+        
+        # Download with retries and timeout
+        for i in {1..5}; do
+          echo "Attempt $i to download NDK..."
+          if wget --tries=3 --timeout=120 -O "$NDK_ZIP_PATH" "$NDK_URL"; then
+            echo "NDK downloaded successfully!"
+            break
           else
-            echo "Error: NDK download failed!"
-            exit 1
+            echo "Download attempt $i failed."
+            rm -f "$NDK_ZIP_PATH" # Remove partial file
+            if [ $i -eq 5 ]; then
+              echo "All download attempts failed. Exiting."
+              exit 1
+            fi
+            sleep 30 # Wait before retrying
           fi
+        done
 
-      - name: Install Buildozer and dependencies
-        run: |
-          pip install --upgrade pip setuptools wheel
-          pip install --upgrade buildozer
-          pip install --upgrade Cython==0.29.36 # 固定兼容版本
+    - name: Install Buildozer and dependencies
+      run: |
+        pip install --upgrade pip setuptools wheel
+        pip install --upgrade buildozer
+        pip install --upgrade Cython==0.29.36
 
-      - name: Clean previous builds and caches
-        run: |
-          # 清理构建缓存
-          buildozer android clean
-          # 删除可能不完整的临时文件
-          rm -rf .buildozer/android/platform/build-*
-          # 确保缓存目录存在
-          mkdir -p $HOME/.buildozer/android/packages
+    - name: Clean previous builds
+      run: |
+        buildozer android clean
+        # Ensure cache directories exist
+        mkdir -p $HOME/.buildozer/android/packages
 
-      - name: Build APK
-        run: |
-          # 设置环境变量，确保使用我们下载的 NDK
-          export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r28c"
-          export PATH="$ANDROID_NDK_HOME:$PATH"
-          # 开始构建
-          buildozer -v android debug
+    - name: Build APK with 16K alignment
+      run: |
+        # Set environment variables for the build
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r28c"
+        export PATH="$ANDROID_NDK_HOME:$PATH"
+        
+        # Build with verbose output for debugging
+        buildozer -v android debug
 
-      - name: Upload APK
-        if: always() # 即使构建失败也上传产物，用于调试[6](@ref)
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-apk
-          path: bin/*.apk # 上传生成的 APK 文件
+    - name: Upload APK artifact
+      if: always() # Upload even if build fails for debugging
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk
+        path: bin/*.apk
+
+
 
