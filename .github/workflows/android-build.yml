@@ -1,62 +1,68 @@
 name: Android APK Builder with API 31
 
 on:
-  workflow_dispatch:  # 允许手动触发
-  push:               # 推送代码时自动触发
-    branches: [main]
+  workflow_dispatch: # 允许手动触发
+  push: # 推送代码时自动触发
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    - name: 设置 Android NDK (使用镜像)
-      run: |
-    NDK_URL="https://repo.huaweicloud.com/android/repository/android-ndk-r28c-linux.zip" # 使用镜像
-    NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk/"
-    mkdir -p $NDK_CACHE_PATH
-    wget --tries=3 --timeout=60 -O $NDK_CACHE_PATH/android-ndk-r28c-linux.zip $NDK_URL || exit 1
-    - name: Download Android NDK (with retry)
-      run: |
-    # 设置镜像源和重试参数
-    NDK_URL="https://dl.google.com/android/repository/android-ndk-r28c-linux.zip"
-    # 使用 wget 命令，支持重试和超时设置
-    wget --tries=3 --timeout=60 -O android-ndk-r28c-linux.zip "$NDK_URL" || exit 1
-    # 检查文件是否下载完整
-    if [ ! -f "android-ndk-r28c-linux.zip" ]; then
-        echo "Error: NDK download failed!"
-        exit 1
-    fi
-    # 解压并设置环境变量
-    unzip -q android-ndk-r28c-linux.zip -d $HOME/android-ndk
-    echo "ANDROID_NDK_HOME=$HOME/android-ndk/android-ndk-r28c" >> $GITHUB_ENV
-    echo "PATH=$HOME/android-ndk/android-ndk-r28c:$PATH" >> $GITHUB_ENV
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9' # 使用兼容性好的 Python 3.9
 
-    - name: Clean previous builds and caches
-      run: |
-    # 清理 buildozer 缓存
-    buildozer android clean
-    # 删除可能不完整的临时文件
-    rm -rf .buildozer/android/packages
-    rm -rf /tmp/*
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget unzip openjdk-17-jdk autoconf automake libtool libffi-dev libssl-dev
 
-    - name: Install Buildozer and dependencies
-      run: |
-    pip install --upgrade pip setuptools wheel
-    pip install --upgrade buildozer  # 确保最新版
-    pip install --upgrade Cython==0.29.36  # 固定兼容版本
-    - name: Build APK
-      run: buildozer android debug
+      - name: Download Android NDK (from mirror with retry)
+        run: |
+          NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk/"
+          mkdir -p $NDK_CACHE_PATH
+          # 使用华为云镜像下载，并设置重试策略
+          wget --tries=3 --timeout=90 -O $NDK_CACHE_PATH/android-ndk-r28c-linux.zip "https://repo.huaweicloud.com/android/repository/android-ndk-r28c-linux.zip" || exit 1
+          # 验证下载文件是否完整（可选但推荐）
+          if [ -f "$NDK_CACHE_PATH/android-ndk-r28c-linux.zip" ]; then
+            echo "NDK downloaded successfully to $NDK_CACHE_PATH"
+          else
+            echo "Error: NDK download failed!"
+            exit 1
+          fi
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: android-apk
-        path: bin/*.apk
+      - name: Install Buildozer and dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --upgrade buildozer
+          pip install --upgrade Cython==0.29.36 # 固定兼容版本
+
+      - name: Clean previous builds and caches
+        run: |
+          # 清理构建缓存
+          buildozer android clean
+          # 删除可能不完整的临时文件
+          rm -rf .buildozer/android/platform/build-*
+          # 确保缓存目录存在
+          mkdir -p $HOME/.buildozer/android/packages
+
+      - name: Build APK
+        run: |
+          # 设置环境变量，确保使用我们下载的 NDK
+          export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r28c"
+          export PATH="$ANDROID_NDK_HOME:$PATH"
+          # 开始构建
+          buildozer -v android debug
+
+      - name: Upload APK
+        if: always() # 即使构建失败也上传产物，用于调试[6](@ref)
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: bin/*.apk # 上传生成的 APK 文件
+
