@@ -1,0 +1,284 @@
+# my.kv
+#:set color_bg "#f0f0f0"        # 背景色-浅灰
+#:set color_panel_bg "#ffffff"  # 面板背景色-白
+#:set color_primary "#2c3e50"   # 主色调-深蓝
+#:set color_accent "#e74c3c"     # 强调色-红色
+#:set color_text "#333333"       # 主要文字颜色-深灰
+#:set color_success "#27ae60"   # 成功色-绿色
+#:set color_warning "#f39c12"   # 警告色-橙色
+
+# 字体配置 - 请确保此路径正确指向您的字体文件
+#:set font_chinese 'assets/fonts/msyh.ttf'  # 微软雅黑字体路径
+#:set font_size_small 30
+#:set font_size_medium 35
+#:set font_size_large 50
+
+# 自定义按钮样式
+<CustomButton@Button>:
+    size_hint_y: None
+    height: 160
+    background_color: 0.9, 0.9, 0.9, 1
+    background_normal: ''
+    color: color_text
+    border: (1, 1, 1, 1)
+    font_size: font_size_small
+    font_name: font_chinese  # 确保中文字体
+
+<CategoryButton@Button>:
+    size_hint_y: None
+    height: 42
+    size_hint_x: None
+    width: 125
+    background_color: (0.9, 0.9, 0.9, 1) if self.text != "我的" else (0.9, 0.7, 0.7, 1)
+    background_normal: ''
+    color: (0.2, 0.2, 0.2, 1) if self.text != "我的" else (0.8, 0.2, 0.2, 1)
+    font_size: font_size_small
+    bold: True if self.text == "我的" else False
+    font_name: font_chinese
+
+<WebsiteButton@Button>:
+    size_hint_y: None
+    height: 55
+    background_color: 0.95, 0.95, 0.95, 1
+    background_normal: ''
+    color: color_text
+    font_size: font_size_medium
+    border: (1, 1, 1, 1)
+    font_name: font_chinese
+
+# 主布局
+<MainLayout@BoxLayout>:
+    orientation: 'horizontal'
+    padding: 20
+    spacing: 20
+    canvas.before:
+        Color:
+            rgba: 0.95, 0.95, 0.95, 1
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    # 左侧主内容区 (70%)
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_x: 0.7
+        spacing: 12
+
+        # 标题和搜索区域
+        BoxLayout:
+            size_hint_y: None
+            height: 60
+            spacing: 30
+
+            Label:
+                text: "智能官网直达工具"
+                font_size: font_size_large
+                bold: True
+                color: color_primary
+                size_hint_x: 0.4
+                font_name: font_chinese
+
+            Label:
+                text: "搜索网站:"
+                size_hint_x: 0.15
+                font_size: font_size_medium
+                font_name: font_chinese
+
+            TextInput:
+                id: search_input
+                size_hint_x: 0.35
+                height: 45
+                font_size: font_size_small
+                font_name: font_chinese
+                hint_text: "输入网站名称或URL"
+                padding: [8, 0]
+
+            Button:
+                text: "搜索"
+                size_hint_x: 0.15
+                height: 45
+                font_size: font_size_small
+                font_name: font_chinese
+                background_color: 0.2, 0.6, 0.8, 1
+                color: 1, 1, 1, 1
+                on_press: app.search_website()
+
+            Button:
+                text: "重置"
+                size_hint_x: 0.15
+                height: 45
+                font_size: font_size_small
+                font_name: font_chinese
+                background_color: 0.8, 0.8, 0.8, 1
+                on_press: app.reset_search()
+
+        # 分类导航
+        BoxLayout:
+            size_hint_y: None
+            height: 50
+            spacing: 8
+
+            Label:
+                text: "分类导航:"
+                size_hint_x: 0.12
+                font_size: font_size_medium
+                bold: True
+                color: color_primary
+                font_name: font_chinese
+
+            ScrollView:
+                size_hint_x: 0.88
+                do_scroll_y: False
+                do_scroll_x: True
+                bar_width: 8
+
+                GridLayout:
+                    id: category_container
+                    cols: 20
+                    size_hint_x: None
+                    width: self.minimum_width
+                    size_hint_y: None
+                    height: 35
+                    spacing: 5
+
+        # 网站列表区域
+        ScrollView:
+            size_hint_y: 0.9
+            bar_width: 15
+            do_scroll_x: False
+
+            GridLayout:
+                id: website_grid
+                cols: 6
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: 30
+                padding: 15
+
+        # 状态栏
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            canvas.before:
+                Color:
+                    rgba: 0.9, 0.9, 0.9, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+
+            Label:
+                id: status_label
+                text: "就绪"
+                font_size: font_size_small
+                color: color_text
+                font_name: font_chinese
+                size_hint_x: 0.8
+
+            Label:
+                id: count_label
+                text: "共 0 个网站"
+                font_size: font_size_small
+                color: color_text
+                font_name: font_chinese
+                size_hint_x: 0.2
+                halign: 'right'
+
+    # 右侧添加面板 (30%)
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_x: 0.3
+        padding: 20
+        spacing: 15
+        canvas.before:
+            Color:
+                rgba: 0.98, 0.98, 0.98, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        Label:
+            text: "添加新网站"
+            size_hint_y: None
+            height: 50
+            font_size: 30
+            bold: True
+            color: color_primary
+            font_name: font_chinese
+
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint_y: None
+            height: 55
+            spacing: 8
+
+            Label:
+                text: "名称:"
+                size_hint_x: 0.3
+                font_size: font_size_medium
+                font_name: font_chinese
+                bold: True
+
+            TextInput:
+                id: name_input
+                size_hint_x: 0.7
+                height: 55
+                font_size: font_size_small
+                font_name: font_chinese
+                hint_text: "输入网站名称"
+                padding: [8, 0]
+
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint_y: None
+            height: 55
+            spacing: 8
+
+            Label:
+                text: "URL:"
+                size_hint_x: 0.3
+                font_size: font_size_medium
+                font_name: font_chinese
+                bold: True
+
+            TextInput:
+                id: url_input
+                size_hint_x: 0.7
+                height: 55
+                font_size: font_size_small
+                font_name: font_chinese
+                hint_text: "https://example.com"
+                padding: [8, 0]
+
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint_y: None
+            height: 55
+            spacing: 8
+
+            Label:
+                text: "分类:"
+                size_hint_x: 0.3
+                font_size: font_size_medium
+                font_name: font_chinese
+                bold: True
+
+            Spinner:
+                id: category_spinner
+                text: "其他"
+                size_hint_x: 0.7
+                height: 55
+                font_size: font_size_small
+                font_name: font_chinese
+                values: ["我的", "全部", "社交", "购物", "视频", "音乐", "技术", "新闻", "其他"]
+                background_color: 1, 1, 1, 1
+
+        Button:
+            text: "添加网站"
+            size_hint_y: None
+            height: 45
+            font_size: font_size_medium
+            font_name: font_chinese
+            background_color: color_success
+            color: 1, 1, 1, 1
+            bold: True
+            on_press: app.add_website()
