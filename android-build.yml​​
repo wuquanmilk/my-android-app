@@ -1,28 +1,28 @@
-name: Android APK 构建 (NDK 28c + API 31 + 优化配置)
+name: Android APK 构建 (NDK 28c + API 31 + 优化配置)名称：Android APK 构建 (NDK 28c + API 31 + 优化配置)
 
-on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:
+on:开启：
+  push:  推送：
+    branches: [main, master]    分支： [main, master]
+  workflow_dispatch:  工作流触发：
 
-env:
+env:环境：
   # 使用您指定的版本
-  NDK_VERSION: "28c"
+  NDK_VERSION: "28c"  NDK版本: "28c"
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
 
-jobs:
+jobs:工作：
   build-android:
     runs-on: ubuntu-latest
     
     steps:
     - name: 下载代码和配置文件
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4      使用：actions/checkout@v4
 
     - name: 设置Python环境
-      uses: actions/setup-python@v4
-      with:
+      uses: actions/setup-python@v4      使用：actions/setup-python@v4
+      with:      包含：
         python-version: '3.10'
 
     - name: 安装系统依赖
@@ -53,7 +53,7 @@ jobs:
           "build-tools;${{ env.BUILD_TOOLS }}" \
           "platform-tools"
         
-        # 下载和设置 NDK r28c
+        # NDK r28c
         wget https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip
         unzip android-ndk-${{ env.NDK_VERSION }}-linux.zip
         
