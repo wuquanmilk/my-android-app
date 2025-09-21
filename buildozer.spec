@@ -17,8 +17,7 @@ android.api = 31
 android.minapi = 21
 android.ndk = 28c
 android.ndk_api = 21
-android.sdk = 31
-android.arch = arm64-v8a
+android.archs = arm64-v8a
 
 # ==================== 高级优化配置 ====================
 # 1. AndroidX 支持（现代架构）
