@@ -5,16 +5,16 @@ package.domain = org.example
 source.dir = .
 version = 1.0
 
-# 修正 requirements，去掉 libffi（p4a 自带）
-requirements = python3, kivy, cython==0.29.36
-
+# 修正依赖版本
+requirements = python3, kivy, cython==0.29.36, libffi
 orientation = portrait
 fullscreen = 0
 
-# API 和 NDK 配置
+# 修正API和NDK配置
 android.api = 31
 android.minapi = 21
 android.ndk = 28c
+android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r28c
 android.ndk_api = 21
 android.archs = arm64-v8a
 android.use_precompiled = True
@@ -23,13 +23,16 @@ android.precompiled_dir = ./precompiled
 android.enable_androidx = True
 android.enable_jetifier = True
 
-# 优化编译和 16K 对齐
+# 编译优化和 16K 内存对齐
 android.extra_cflags = -O2 -fPIC -DNDEBUG
 android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384
 
 source.include_exts = py,png,jpg,kv,ttf,otf,json,xml,ttc,woff,woff2
 source.include_dirs = fonts,images,data,assets
 
+# 移除android.sdk=28（不正确配置）
+
+# 自定义 AndroidManifest
 android.manifest = <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.example.myapp"
@@ -65,6 +68,7 @@ android.manifest = <?xml version="1.0" encoding="utf-8"?>
 </manifest>
 
 log_level = 2
+
 android.accept_sdk_license = True
 
 [buildozer]
