@@ -58,7 +58,7 @@ android.manifest = <?xml version="1.0" encoding="utf-8"?>
             android:exported="true">
             
             <intent-filter>
-                <action android:name极速加速器="android.intent.action.MAIN" />
+                <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
