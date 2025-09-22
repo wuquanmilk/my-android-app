@@ -1,36 +1,36 @@
 name: Android APK Build (Stable - NDK r28c)
 
 on:
-  workflow_dispatch:  # 允许手动触发工作流
+  workflow_dispatch:  # 允许手动触发
   push:               # 推送代码时自动触发
     branches: [ main ]
-    paths:            # 仅当相关文件更改时触发
+    paths:
       - '**.py'
       - '**.kv'
       - 'buildozer.spec'
       - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "28c"           # NDK 版本简称 (用于下载URL)
-  NDK_FULL_VERSION: "28.2.13676358" # NDK 完整版本号 (用于buildozer.spec配置)
+  NDK_VERSION: "28c"           # NDK 版本简称 (用于URL)
+  NDK_FULL_VERSION: "28.2.13676358" # NDK 完整版本号 (用于buildozer.spec)
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
-  PYTHON_VERSION: "3.9"        # 使用兼容性好的Python 3.9
+  PYTHON_VERSION: "3.9"
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 60         # 设置超时防止无限挂起
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4  # 检出代码[4,5](@ref)
+      uses: actions/checkout@v4
 
     - name: Set up Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v4
       with:
-        python-version: '${{ env.PYTHON_VERSION }}'  # 设置Python版本[7](@ref)
+        python-version: '${{ env.PYTHON_VERSION }}'
 
     - name: Install system dependencies
       run: |
@@ -38,43 +38,49 @@ jobs:
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
           autoconf automake libtool \
-          libffi-dev libssl-dev git make p7zip-full  # 安装系统依赖[1](@ref)
+          libffi-dev libssl-dev git make p7zip-full
 
     - name: Install Buildozer and dependencies
       run: |
         pip install --upgrade pip setuptools wheel
         pip install --upgrade buildozer
-        pip install --upgrade Cython==0.29.36  # 安装Buildozer和固定版本的Cython[1](@ref)
+        pip install --upgrade Cython==0.29.36
 
-    - name: Conditional Buildozer Initialization
+    - name: Verify and update buildozer.spec
       run: |
+        # 确保 buildozer.spec 存在且配置正确
         if [ ! -f "buildozer.spec" ]; then
           buildozer init
-          echo "Buildozer initialized successfully"
+          echo "Created new buildozer.spec"
         else
-          echo "buildozer.spec already exists, checking configuration..."
-          # 确保spec文件中的NDK版本配置正确
-          if grep -q "android.ndk" buildozer.spec; then
-            sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
-            echo "Updated buildozer.spec to use NDK ${{ env.NDK_FULL_VERSION }}"
-          else
-            echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
-            echo "Added NDK configuration to buildozer.spec"
-          fi
+          echo "buildozer.spec already exists"
         fi
+        
+        # 更新或添加 NDK 配置
+        if grep -q "android.ndk" buildozer.spec; then
+          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
+          echo "Updated NDK version to ${{ env.NDK_FULL_VERSION }}"
+        else
+          echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
+          echo "Added NDK configuration"
+        fi
+        
+        # 显示最终配置
+        echo "Current buildozer.spec NDK setting:"
+        grep "android.ndk" buildozer.spec || true
 
-    - name: Download Android NDK (Official Source with Enhanced Retry)
+    - name: Download Android NDK (Enhanced Reliability)
       run: |
         NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
         mkdir -p $NDK_CACHE_PATH
         
-        # 使用官方下载URL格式[1](@ref)
-        NDK_URL="https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+        # 使用您提供的镜像源
+        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
         NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
         
-        echo "Downloading from official source: $NDK_URL"
+        echo "Downloading from your mirror: $NDK_URL"
         
-        # 增强的重试机制（最多5次尝试）
+        # 增强的重试机制
         MAX_ATTEMPTS=5
         for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
           echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
@@ -97,6 +103,7 @@ jobs:
                 break
               else
                 echo "Error: Extraction succeeded but directory not found!"
+                rm -f "$NDK_ZIP_PATH"
               fi
             else
               echo "Error: Downloaded ZIP file is corrupted or incomplete!"
@@ -114,8 +121,8 @@ jobs:
           else
             echo "Error: All $MAX_ATTEMPTS download attempts failed!"
             echo "Please check:"
-            echo "1. The official NDK URL: $NDK_URL"
-            echo "2. Network connectivity to dl.google.com"
+            echo "1. The mirror URL availability: $NDK_URL"
+            echo "2. Network connectivity"
             exit 1
           fi
         done
@@ -130,7 +137,7 @@ jobs:
         echo "NDK contents:"
         ls "$ANDROID_NDK_HOME" | head -10
         
-        # 执行构建并捕获输出到日志文件[1](@ref)
+        # 执行构建并捕获输出到日志文件
         buildozer -v android debug 2>&1 | tee build_output.log
 
     - name: Verify build output
@@ -147,18 +154,37 @@ jobs:
         fi
 
     - name: Prepare logs for upload
-      if: always()  # 即使构建失败也执行
+      if: always()
       run: |
+        # 创建日志目录
         mkdir -p artifacts_logs
-        # 收集所有可能的日志文件
-        find . -name "*.log" -exec cp {} artifacts_logs/ \; 2>/dev/null || true
-        # 复制buildozer.spec用于调试
-        cp buildozer.spec artifacts_logs/ || true
+        
+        # 复制所有可能的日志文件
+        if [ -d ".buildozer" ]; then
+          echo "Copying .buildozer logs..."
+          find .buildozer -name "*.log" -exec cp {} artifacts_logs/ \; 2>/dev/null || true
+        else
+          echo ".buildozer directory not found"
+        fi
+        
+        # 复制构建输出日志
+        if [ -f "build_output.log" ]; then
+          echo "Copying build output log..."
+          cp build_output.log artifacts_logs/
+        fi
+        
+        # 复制配置文件
+        if [ -f "buildozer.spec" ]; then
+          echo "Copying buildozer.spec..."
+          cp buildozer.spec artifacts_logs/
+        fi
+        
+        # 显示准备上传的日志文件
         echo "Logs prepared for upload:"
         ls -la artifacts_logs/ || true
 
     - name: Upload APK artifact
-      if: success()  # 只有构建成功时才上传APK
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: android-apk-${{ github.run_number }}
@@ -166,9 +192,9 @@ jobs:
         retention-days: 7
 
     - name: Upload build logs
-      if: always()  # 即使构建失败也上传日志
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs-${{ github.run_number }}
         path: artifacts_logs/
-        if-no-files-found: ignore  # 如果没有文件也不报错[3](@ref)
+        if-no-files-found: ignore
