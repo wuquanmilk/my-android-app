@@ -1,8 +1,8 @@
-name: Android APK Build (Direct Gradle - No Buildozer)
+name: Android APK Build (NDK r28c + 16K Alignment)
 
 on:
-  workflow_dispatch:
-  push:
+  workflow_dispatch:  # 允许手动触发
+  push:               # 推送代码时自动触发
     branches: [ main ]
     paths:
       - '**.py'
@@ -11,21 +11,23 @@ on:
       - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "28c"
-  GRADLE_VERSION: "8.5"
+  NDK_VERSION: "28c"           # NDK 版本简称 (用于URL)
+  NDK_FULL_VERSION: "28.2.13676358" # NDK 完整版本号 (用于buildozer.spec)
   ANDROID_API: 31
+  MIN_API: 21
+  BUILD_TOOLS: "34.0.0"
   PYTHON_VERSION: "3.9"
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v4
       with:
         python-version: '${{ env.PYTHON_VERSION }}'
@@ -36,163 +38,188 @@ jobs:
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
           autoconf automake libtool \
-          libffi-dev libssl-dev git make
+          libffi-dev libssl-dev git make p7zip-full curl
 
-    - name: Install Android NDK manually
+    - name: Install Buildozer and dependencies
       run: |
-        echo "=== 手动安装 Android NDK ==="
-        
-        # 创建目录
-        mkdir -p $HOME/android-ndk
-        NDK_DIR="$HOME/android-ndk"
-        
-        # 使用可靠的镜像源下载 NDK
-        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        
-        echo "下载 NDK from: $NDK_URL"
-        curl -L --progress-bar --retry 3 --max-time 300 -o /tmp/ndk.zip "$NDK_URL"
-        
-        # 验证并解压
-        if unzip -tq /tmp/ndk.zip; then
-          unzip -q /tmp/ndk.zip -d "$NDK_DIR"
-          rm /tmp/ndk.zip
-          echo "NDK 安装成功!"
+        pip install --upgrade pip setuptools wheel
+        pip install --upgrade buildozer
+        pip install --upgrade Cython==0.29.36
+
+    - name: Verify and update buildozer.spec
+      run: |
+        # 确保 buildozer.spec 存在且配置正确
+        if [ ! -f "buildozer.spec" ]; then
+          buildozer init
+          echo "Created new buildozer.spec"
         else
-          echo "NDK 文件损坏!"
-          exit 1
+          echo "buildozer.spec already exists"
         fi
         
-        # 设置环境变量
-        echo "ANDROID_NDK_HOME=$NDK_DIR/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-        echo "NDK_HOME=$NDK_DIR/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-        echo "PATH=$NDK_DIR/android-ndk-r${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
+        # 更新或添加 NDK 配置
+        if grep -q "android.ndk" buildozer.spec; then
+          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
+          echo "Updated NDK version to ${{ env.NDK_FULL_VERSION }}"
+        else
+          echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
+          echo "Added NDK configuration"
+        fi
+        
+        # 添加 16K 内存对齐配置
+        if ! grep -q "android.extra_ldflags" buildozer.spec; then
+          echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
+          echo "Added 16K memory alignment configuration"
+        fi
+        
+        # 显示最终配置
+        echo "Current buildozer.spec configuration:"
+        grep -E "(android.ndk|android.extra_ldflags)" buildozer.spec || true
 
-    - name: Install Gradle directly
+    - name: Download Android NDK (Enhanced Reliability)
       run: |
-        echo "=== 安装 Gradle ==="
+        NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
+        mkdir -p $NDK_CACHE_PATH
         
-        # 下载并安装指定版本的 Gradle
-        GRADLE_URL="https://services.gradle.org/distributions/gradle-${{ env.GRADLE_VERSION }}-bin.zip"
-        echo "下载 Gradle from: $GRADLE_URL"
+        # 使用可靠的镜像源
+        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
         
-        curl -L --progress-bar -o /tmp/gradle.zip "$GRADLE_URL"
-        unzip -q /tmp/gradle.zip -d /opt/
-        rm /tmp/gradle.zip
+        echo "Downloading from reliable mirror: $NDK_URL"
         
-        # 设置环境变量
-        GRADLE_HOME="/opt/gradle-${{ env.GRADLE_VERSION }}"
-        echo "GRADLE_HOME=$GRADLE_HOME" >> $GITHUB_ENV
-        echo "PATH=$GRADLE_HOME/bin:$PATH" >> $GITHUB_ENV
-        
-        echo "Gradle 安装完成!"
-
-    - name: Install Python-for-Android and dependencies
-      run: |
-        echo "=== 安装 Python-for-Android ==="
-        
-        # 安装 p4a
-        pip install python-for-android
-        
-        # 安装其他依赖
-        pip install cython==0.29.36
-        pip install kivy
-
-    - name: Create Android project with p4a
-      run: |
-        echo "=== 使用 p4a 创建 Android 项目 ==="
-        
-        # 设置环境变量
-        export ANDROID_NDK_HOME="$HOME/android-ndk/android-ndk-r${{ env.NDK_VERSION }}"
-        export NDK_HOME="$ANDROID_NDK_HOME"
-        export GRADLE_HOME="/opt/gradle-${{ env.GRADLE_VERSION }}"
-        export PATH="$ANDROID_NDK_HOME:$GRADLE_HOME/bin:$PATH"
-        
-        # 使用 p4a 创建项目
-        python -m pythonforandroid.toolchain create \
-          --dist_name myapp \
-          --bootstrap sdl2 \
-          --requirements python3,kivy \
-          --arch arm64-v8a \
-          --ndk-path "$ANDROID_NDK_HOME" \
-          --sdk-version ${{ env.ANDROID_API }} \
-          --private . \
-          --debug
-
-    - name: Build APK with direct Gradle
-      run: |
-        echo "=== 直接使用 Gradle 构建 APK ==="
-        
-        # 设置环境变量
-        export ANDROID_NDK_HOME="$HOME/android-ndk/android-ndk-r${{ env.NDK_VERSION }}"
-        export GRADLE_HOME="/opt/gradle-${{ env.GRADLE_VERSION }}"
-        export PATH="$ANDROID_NDK_HOME:$GRADLE_HOME/bin:$PATH"
-        
-        # 找到 p4a 生成的项目目录
-        P4A_DIST_DIR="$HOME/.local/share/python-for-android/dists/myapp"
-        
-        if [ -d "$P4A_DIST_DIR" ]; then
-          echo "找到 p4a 项目目录: $P4A_DIST_DIR"
-          cd "$P4A_DIST_DIR"
+        # 增强的重试机制
+        MAX_ATTEMPTS=5
+        for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
+          echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
           
-          # 直接使用系统 Gradle 构建（如您建议的）
-          echo "使用系统 Gradle 构建..."
-          "$GRADLE_HOME/bin/gradle" clean assembleDebug --no-daemon --stacktrace
-          
-          # 检查构建结果
-          if [ $? -eq 0 ]; then
-            echo "Gradle 构建成功!"
+          # 使用curl下载，显示进度，设置超时和重试
+          if curl -L --progress-bar --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
+            echo "Download completed. Verifying file integrity..."
             
-            # 查找生成的 APK
-            APK_PATH=$(find . -name "*.apk" | head -1)
-            if [ -n "$APK_PATH" ]; then
-              echo "找到 APK: $APK_PATH"
-              # 复制 APK 到工作目录
-              mkdir -p $GITHUB_WORKSPACE/bin
-              cp "$APK_PATH" $GITHUB_WORKSPACE/bin/
-              echo "APK 已复制到 bin/ 目录"
+            # 验证ZIP文件完整性
+            if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
+              echo "ZIP file integrity verified. Extracting..."
+              
+              # 解压NDK
+              unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+              
+              # 验证解压后的目录
+              if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
+                echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
+                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+                break
+              else
+                echo "Error: Extraction succeeded but directory not found!"
+                rm -f "$NDK_ZIP_PATH"
+              fi
             else
-              echo "未找到 APK 文件"
-              exit 1
+              echo "Error: Downloaded ZIP file is corrupted or incomplete!"
+              rm -f "$NDK_ZIP_PATH"
             fi
           else
-            echo "Gradle 构建失败!"
+            echo "Download attempt $attempt failed."
+            rm -f "$NDK_ZIP_PATH"
+          fi
+          
+          # 如果不是最后一次尝试，等待后重试
+          if [ $attempt -lt $MAX_ATTEMPTS ]; then
+            echo "Waiting 30 seconds before next attempt..."
+            sleep 30
+          else
+            echo "Error: All $MAX_ATTEMPTS download attempts failed!"
+            echo "Please check:"
+            echo "1. The mirror URL availability: $NDK_URL"
+            echo "2. Network connectivity"
             exit 1
           fi
-        else
-          echo "未找到 p4a 项目目录"
-          exit 1
-        fi
+        done
 
-    - name: Verify and test APK
+    - name: Build with Buildozer
       run: |
-        echo "=== 验证 APK ==="
+        # 设置环境变量
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
+        export PATH="$ANDROID_NDK_HOME:$PATH"
         
+        echo "Using NDK path: $ANDROID_NDK_HOME"
+        echo "NDK contents:"
+        ls "$ANDROID_NDK_HOME" | head -10
+        
+        # 执行构建
+        buildozer -v android debug
+
+    - name: Verify build output
+      run: |
         if ls bin/*.apk 1> /dev/null 2>&1; then
           APK_FILE=$(ls bin/*.apk | head -1)
-          echo "构建成功! APK 文件: $APK_FILE"
-          echo "文件大小: $(du -h "$APK_FILE" | cut -f1)"
-          
-          # 检查 APK 基本信息
-          echo "APK 内容:"
-          unzip -l "$APK_FILE" | head -20
+          echo "Build successful! APK file: $APK_FILE"
+          echo "File size: $(du -h "$APK_FILE" | cut -f1)"
         else
-          echo "错误: 未找到 APK 文件!"
+          echo "Error: No APK file found in bin/ directory!"
+          echo "Contents of bin/:"
+          ls -la bin/ || true
           exit 1
         fi
 
+    - name: Prepare logs for analysis
+      if: always()
+      run: |
+        # 创建专用日志目录，避免权限问题
+        mkdir -p build_logs
+        
+        # 安全地收集日志文件
+        find . -name "*.log" -exec cp {} build_logs/ \; 2>/dev/null || true
+        
+        # 复制配置文件
+        cp buildozer.spec build_logs/ || true
+        
+        echo "Logs prepared for upload:"
+        ls -la build_logs/ || true
+
     - name: Upload APK artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: android-apk
         path: bin/*.apk
         retention-days: 7
 
-    - name: Upload build logs on failure
-      if: failure()
+    - name: Upload build logs
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: |
-          ~/.local/share/python-for-android/
-          /tmp/
+        path: build_logs/
         if-no-files-found: ignore
+        retention-days: 7
+
+    - name: Fallback - Direct p4a build
+      if: failure()
+      run: |
+        echo "=== Buildozer failed, trying direct python-for-android ==="
+        
+        # 设置环境变量
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
+        export PATH="$ANDROID_NDK_HOME:$PATH"
+        
+        # 安装python-for-android
+        pip install python-for-android
+        
+        # 直接使用p4a构建
+        python -m pythonforandroid.toolchain apk \
+          --dist_name myapp \
+          --bootstrap sdl2 \
+          --requirements python3,kivy \
+          --arch arm64-v8a \
+          --ndk-path "$ANDROID_NDK_HOME" \
+          --debug
+        
+        # 检查构建结果
+        if ls dist/*.apk 1> /dev/null 2>&1; then
+          APK_FILE=$(ls dist/*.apk | head -1)
+          echo "P4A build successful! APK file: $APK_FILE"
+          # 复制APK到标准位置
+          mkdir -p bin
+          cp "$APK_FILE" bin/
+        else
+          echo "P4A build also failed!"
+          exit 1
+        fi
