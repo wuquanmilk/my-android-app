@@ -1,28 +1,27 @@
-name: Android APK 构建 (NDK 28c + API 31 + 优化配置)名称：Android APK 构建 (NDK 28c + API 31 + 优化配置)
+name: Android APK Builder (NDK 28c + API 31 + 优化配置)
 
-on:开启：
-  push:  推送：
-    branches: [main, master]    分支： [main, master]
-  workflow_dispatch:  工作流触发：
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
 
-env:环境：
-  # 使用您指定的版本
-  NDK_VERSION: "28c"  NDK版本: "28c"
+env:
+  NDK_VERSION: "28c"
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
 
-jobs:工作：
+jobs:
   build-android:
     runs-on: ubuntu-latest
     
     steps:
     - name: 下载代码和配置文件
-      uses: actions/checkout@v4      使用：actions/checkout@v4
+      uses: actions/checkout@v4
 
     - name: 设置Python环境
-      uses: actions/setup-python@v4      使用：actions/setup-python@v4
-      with:      包含：
+      uses: actions/setup-python@v4
+      with:
         python-version: '3.10'
 
     - name: 安装系统依赖
@@ -38,29 +37,32 @@ jobs:工作：
 
     - name: 设置Android环境 (NDK r28c)
       run: |
-        # 下载和设置Android SDK
-        wget https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
-        unzip commandlinetools-linux-8512546_latest.zip
-        mkdir -p android-sdk/cmdline-tools/latest
-        mv cmdline-tools/* android-sdk/cmdline-tools/latest/
+        # 创建Android SDK目录
+        mkdir -p android-sdk
         
-        # 接受许可协议
-        yes | android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-        
-        # 安装必要的组件
-        android-sdk/cmdline-tools/latest/bin/sdkmanager \
-          "platforms;android-${{ env.ANDROID_API }}" \
-          "build-tools;${{ env.BUILD_TOOLS }}" \
-          "platform-tools"
-        
-        # NDK r28c
-        wget https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip
-        unzip android-ndk-${{ env.NDK_VERSION }}-linux.zip
+        # 下载Android命令行工具（使用可靠版本）
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+        unzip -q cmdline-tools.zip -d android-sdk/cmdline-tools
+        mv android-sdk/cmdline-tools/cmdline-tools android-sdk/cmdline-tools/latest
         
         # 设置环境变量
-        echo "ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-        echo "PATH=$GITHUB_WORKSPACE/android-sdk/platform-tools:$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$GITHUB_WORKSPACE/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+        
+        # 接受许可协议
+        yes | sdkmanager --licenses
+        
+        # 安装必要的Android组件
+        sdkmanager "platforms;android-${{ env.ANDROID_API }}" \
+                   "build-tools;${{ env.BUILD_TOOLS }}" \
+                   "platform-tools" \
+                   "emulator"
+        
+        # 下载NDK r28c（使用官方可靠地址）
+        wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip -O ndk.zip
+        unzip -q ndk.zip
+        echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+        echo "PATH=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
 
     - name: 构建APK (使用优化配置)
       run: |
@@ -68,20 +70,24 @@ jobs:工作：
         buildozer -v android debug
         
         # 检查是否生成APK
-        if [ ! -f "bin/*.apk" ]; then
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+            echo "✅ APK文件已生成"
+        else
             echo "❌ APK文件未生成，构建可能失败"
             exit 1
         fi
 
     - name: 验证构建结果
       run: |
-        APK_FILE=$(find . -name "*.apk" | head -1)
-        echo "✅ APK构建成功!"
-        echo "📦 文件: $APK_FILE"
-        echo "📏 大小: $(du -h "$APK_FILE" | cut -f1)"
-        
-        # 验证API级别
-        aapt dump badging "$APK_FILE" | grep -E "(targetSdkVersion|minSdkVersion)" || echo "⚠️ aapt验证不可用"
+        APK_FILE=$(find bin -name "*.apk" | head -1)
+        if [ -f "$APK_FILE" ]; then
+            echo "✅ APK构建成功!"
+            echo "📦 文件: $APK_FILE"
+            echo "📏 大小: $(du -h "$APK_FILE" | cut -f1)"
+        else
+            echo "❌ 未找到APK文件"
+            exit 1
+        fi
 
     - name: 上传APK产物
       uses: actions/upload-artifact@v4
@@ -89,15 +95,11 @@ jobs:工作：
         name: android-apk-optimized
         path: bin/*.apk
         retention-days: 7
-        compression-level: 6
-        if-no-files-found: error
 
     - name: 完成通知
       if: success()
       run: |
         echo "🎉 优化构建完成!"
         echo "✅ NDK r28c + API 31 配置"
-        echo "✅ 16K内存对齐优化"
-        echo "✅ AndroidX现代架构支持"
-        echo "✅ 性能编译优化"
+        echo "✅ Android SDK 组件已安装"
         echo "📦 APK可在Artifacts中下载"
