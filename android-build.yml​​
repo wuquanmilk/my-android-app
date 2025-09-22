@@ -1,1 +1,91 @@
-####
+name: Android APK Builder with API 31
+
+on:
+  workflow_dispatch: # Allow manual triggers
+  push: # Auto-trigger on push to main
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          wget unzip openjdk-17-jdk \
+          autoconf automake libtool \
+          libffi-dev libssl-dev
+
+    - name: Download Android NDK r28c (Mirror)
+      run: |
+        # 设置缓存路径
+        NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk"
+        mkdir -p $NDK_CACHE_PATH
+        
+        # 使用您提供的镜像地址
+        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r28c-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/android-ndk-r28c-linux.zip"
+        
+        echo "Downloading NDK from mirror: $NDK_URL"
+        
+        # 增强的重试机制
+        for i in {1..5}; do
+          echo "Attempt $i to download NDK..."
+          if wget --tries=3 --timeout=120 -O "$NDK_ZIP_PATH" "$NDK_URL"; then
+            echo "NDK downloaded successfully!"
+            break
+          else
+            echo "Download attempt $i failed."
+            rm -f "$NDK_ZIP_PATH" # 删除不完整文件
+            if [ $i -eq 5 ]; then
+              echo "All download attempts failed. Exiting."
+              exit 1
+            fi
+            sleep 30 # 重试前等待
+          fi
+        done
+        
+        # 解压到缓存目录
+        echo "Unzipping NDK..."
+        unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+        
+        # 设置环境变量
+        echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r28c" >> $GITHUB_ENV
+        echo "PATH=$NDK_CACHE_PATH/android-ndk-r28c:$PATH" >> $GITHUB_ENV
+
+    - name: Install Buildozer and dependencies
+      run: |
+        pip install --upgrade pip setuptools wheel
+        pip install --upgrade buildozer
+        pip install --upgrade Cython==0.29.36
+
+    - name: Clean previous builds
+      run: |
+        buildozer android clean
+        # 确保缓存目录存在
+        mkdir -p $HOME/.buildozer/android/packages
+
+    - name: Build APK with 16K alignment
+      run: |
+        # 设置环境变量
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r28c"
+        export PATH="$ANDROID_NDK_HOME:$PATH"
+        
+        # 开始构建
+        buildozer -v android debug
+
+    - name: Upload APK artifact
+      if: always() # 即使构建失败也上传产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk
+        path: bin/*.apk
