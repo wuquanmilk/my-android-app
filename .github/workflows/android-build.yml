@@ -11,7 +11,7 @@ on:
       - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "25c"           # 使用更稳定的 NDK 版本
+  NDK_VERSION: "28c"           # 使用更稳定的 NDK 版本
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
