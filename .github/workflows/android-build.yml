@@ -59,13 +59,13 @@ jobs:
         
         if [ ! -d "$NDK_DIR" ]; then
           echo "Downloading Android NDK r25b..."
-          wget -q $NDK_URL -O ndk.zip
-          unzip -q ndk.zip -d ~/.buildozer/android/packages/
+          wget -q "$NDK_URL" -O ndk.zip
+          unzip -q ndk.zip -d "$HOME/.buildozer/android/packages/"
           rm ndk.zip
         fi
 
-        echo "NDK_PATH=$NDK_DIR" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
+        echo "NDK_PATH=$NDK_DIR" >> "$GITHUB_ENV"
+        echo "ANDROID_NDK_HOME=$NDK_DIR" >> "$GITHUB_ENV"
 
     - name: Verify and update buildozer.spec
       run: |
@@ -74,8 +74,8 @@ jobs:
           echo "Created new buildozer.spec"
         fi
 
-        sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec
-        sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}|" buildozer.spec
+        sed -i "s|android.ndk =.*|android.ndk = ${NDK_VERSION}|" buildozer.spec
+        sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${NDK_VERSION}|" buildozer.spec
         
         if ! grep -q "android.extra_ldflags" buildozer.spec; then
           echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
@@ -90,7 +90,7 @@ jobs:
 
     - name: Build with Buildozer
       run: |
-        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${NDK_VERSION}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
         export NDK_PATH="$ANDROID_NDK_HOME"
         
