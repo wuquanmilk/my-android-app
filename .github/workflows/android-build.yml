@@ -1,19 +1,10 @@
-name: Android APK Build
+name: Android APK Build with NDK r28c
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '**.py'
-      - '**.kv'
-      - 'buildozer.spec'
-      - '.github/workflows/**'
+on: [workflow_dispatch, push]
 
 env:
-  NDK_VERSION: "28c"
-  ANDROID_API: 31
-  PYTHON_VERSION: "3.9"
+  NDK_VERSION: "28c"           # 用于下载
+  NDK_FULL_VERSION: "28.2.13676358" # 用于buildozer.spec
 
 jobs:
   build-android:
@@ -35,13 +26,30 @@ jobs:
     - name: Install Buildozer
       run: pip install buildozer
 
+    - name: Ensure NDK configuration in buildozer.spec
+      run: |
+        # 确保使用NDK r28c的完整版本号
+        if grep -q "android.ndk" buildozer.spec; then
+          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
+        else
+          echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
+        fi
+        
+        # 添加16K对齐标志
+        if ! grep -q "android.extra_ldflags" buildozer.spec; then
+          echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
+        fi
+
     - name: Build with Buildozer
       run: |
         buildozer android debug
 
-    - name: Upload APK
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: android-apk
-        path: bin/*.apk
+    - name: Check for APK
+      run: |
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "Build successful!"
+          ls -la bin/*.apk
+        else
+          echo "Build failed - no APK found"
+          exit 1
+        fi
