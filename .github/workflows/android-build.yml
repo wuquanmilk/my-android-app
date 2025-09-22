@@ -1,4 +1,4 @@
-name: Android APK Build (Stable)
+name: Android APK Build (Stable - NDK r28c)
 
 on:
   workflow_dispatch:
@@ -11,7 +11,8 @@ on:
       - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "28c"           # 使用更稳定的 NDK 版本
+  NDK_VERSION: "28c"           # NDK 版本简称 (用于URL)
+  NDK_FULL_VERSION: "28.2.13676358" # NDK 完整版本号 (用于buildozer.spec)
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
@@ -20,7 +21,7 @@ env:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50 # 稍长的超时时间，适应NDK下载
 
     steps:
     - name: Checkout code
@@ -37,7 +38,7 @@ jobs:
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
           autoconf automake libtool \
-          libffi-dev libssl-dev git make
+          libffi-dev libssl-dev git make p7zip-full
 
     - name: Install Buildozer and dependencies
       run: |
@@ -51,64 +52,115 @@ jobs:
           buildozer init
           echo "Buildozer initialized successfully"
         else
-          echo "buildozer.spec already exists, skipping initialization"
+          echo "buildozer.spec already exists, checking configuration..."
+          # 确保spec文件中的NDK版本与工作流一致
+          if grep -q "android.ndk" buildozer.spec; then
+            sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
+            echo "Updated buildozer.spec to use NDK ${{ env.NDK_FULL_VERSION }}"
+          else
+            echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
+            echo "Added NDK configuration to buildozer.spec"
+          fi
         fi
 
-    - name: Download Android NDK (with enhanced retry and multiple mirrors)
+    - name: Download Android NDK (Official Source with Enhanced Retry)
       run: |
         NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
         mkdir -p $NDK_CACHE_PATH
         
-        # 尝试多个镜像源
-        NDK_URLS=(
-          "https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-          "https://repo.huaweicloud.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        )
+        # 官方下载URL (仅使用官方源)
+        NDK_URL="https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
         
-        for NDK_URL in "${NDK_URLS[@]}"; do
-          echo "Attempting to download from: $NDK_URL"
-          if wget --tries=3 --timeout=120 -O "$NDK_CACHE_PATH/ndk.zip" "$NDK_URL"; then
-            echo "Download successful!"
-            # 验证文件完整性
-            if unzip -tq "$NDK_CACHE_PATH/ndk.zip"; then
-              echo "ZIP file integrity verified"
-              unzip -q "$NDK_CACHE_PATH/ndk.zip" -d "$NDK_CACHE_PATH"
-              break
+        echo "Target NDK version: ${{ env.NDK_VERSION }}"
+        echo "Download URL: $NDK_URL"
+        echo "Cache path: $NDK_CACHE_PATH"
+        
+        # 增强的重试机制
+        MAX_ATTEMPTS=5
+        for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
+          echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
+          
+          # 使用wget下载，显示进度，设置超时和重试
+          if wget --progress=bar:force --tries=3 --timeout=120 -O "$NDK_ZIP_PATH" "$NDK_URL" 2>&1; then
+            echo "Download completed. Verifying file integrity..."
+            
+            # 验证ZIP文件完整性
+            if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
+              echo "ZIP file integrity verified. Extracting..."
+              
+              # 解压NDK
+              unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+              
+              # 验证解压后的目录
+              if [ -d "$NDK_CACHE_PATH/android-ndk-${{ env.NDK_VERSION }}" ]; then
+                echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
+                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+                exit 0
+              else
+                echo "Error: Extraction succeeded but directory not found!"
+              fi
             else
-              echo "ZIP file corrupted, trying next mirror..."
-              rm -f "$NDK_CACHE_PATH/ndk.zip"
+              echo "Error: Downloaded ZIP file is corrupted or incomplete!"
+              rm -f "$NDK_ZIP_PATH"
             fi
           else
-            echo "Download failed, trying next mirror..."
-            rm -f "$NDK_CACHE_PATH/ndk.zip"
+            echo "Download attempt $attempt failed."
+            rm -f "$NDK_ZIP_PATH"
+          fi
+          
+          # 如果不是最后一次尝试，等待后重试
+          if [ $attempt -lt $MAX_ATTEMPTS ]; then
+            echo "Waiting 30 seconds before next attempt..."
+            sleep 30
           fi
         done
         
-        # 最终验证
-        if [ ! -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
-          echo "Error: All NDK download attempts failed!"
-          exit 1
-        fi
+        echo "Error: All $MAX_ATTEMPTS download attempts failed!"
+        echo "Please check:"
+        echo "1. Network connectivity to dl.google.com"
+        echo "2. The NDK version availability"
+        exit 1
 
     - name: Build with Buildozer
       run: |
-        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
+        # 设置环境变量
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-${{ env.NDK_VERSION }}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
+        
+        echo "Using NDK path: $ANDROID_NDK_HOME"
+        echo "NDK contents:"
+        ls "$ANDROID_NDK_HOME" | head -10
+        
+        # 执行构建
         buildozer -v android debug
+
+    - name: Verify build output
+      run: |
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          APK_FILE=$(ls bin/*.apk | head -1)
+          echo "Build successful! APK file: $APK_FILE"
+          echo "File size: $(du -h "$APK_FILE" | cut -f1)"
+        else
+          echo "Error: No APK file found in bin/ directory!"
+          echo "Contents of bin/:"
+          ls -la bin/ || true
+          exit 1
+        fi
 
     - name: Upload APK artifact
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: android-apk
+        name: android-apk-${{ github.run_number }}
         path: bin/*.apk
         retention-days: 7
 
-    - name: Upload logs on failure
+    - name: Upload build logs on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
+        name: build-logs-${{ github.run_number }}
         path: |
           .buildozer/**/*.log
           *.log
