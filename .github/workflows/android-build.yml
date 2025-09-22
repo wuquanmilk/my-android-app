@@ -1,28 +1,35 @@
-name: Android APK Builder (NDK 28c + API 31)
+name: Android APK Build (Stable)
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
+    paths:
+      - '**.py'
+      - '**.kv'
+      - 'buildozer.spec'
+      - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "28c"
+  NDK_VERSION: "25c"           # 使用更稳定的 NDK 版本
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
+  PYTHON_VERSION: "3.9"
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 40
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.9
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '${{ env.PYTHON_VERSION }}'
 
     - name: Install system dependencies
       run: |
@@ -40,62 +47,53 @@ jobs:
 
     - name: Conditional Buildozer Initialization
       run: |
-        # 只在 buildozer.spec 不存在时初始化
         if [ ! -f "buildozer.spec" ]; then
-          echo "Initializing Buildozer..."
           buildozer init
           echo "Buildozer initialized successfully"
         else
           echo "buildozer.spec already exists, skipping initialization"
-          # 显示现有配置摘要
-          echo "Current buildozer.spec contents:"
-          head -20 buildozer.spec || true
         fi
 
-    - name: Download Android NDK (with enhanced retry)
+    - name: Download Android NDK (with enhanced retry and multiple mirrors)
       run: |
-        # 设置NDK缓存路径
-        NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk"
+        NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
         mkdir -p $NDK_CACHE_PATH
         
-        # 使用官方下载地址
-        NDK_URL="https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
+        # 尝试多个镜像源
+        NDK_URLS=(
+          "https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+          "https://repo.huaweicloud.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+        )
         
-        # 增强的重试机制
-        for i in {1..5}; do
-          echo "Attempt $i to download NDK from $NDK_URL..."
-          if wget --tries=3 --timeout=120 -O "$NDK_ZIP_PATH" "$NDK_URL"; then
-            echo "NDK downloaded successfully!"
-            # 解压NDK
-            unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
-            # 设置环境变量
-            echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-            echo "PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
-            break
-          else
-            echo "Download attempt $i failed."
-            rm -f "$NDK_ZIP_PATH"
-            if [ $i -eq 5 ]; then
-              echo "All download attempts failed!"
-              exit 1
+        for NDK_URL in "${NDK_URLS[@]}"; do
+          echo "Attempting to download from: $NDK_URL"
+          if wget --tries=3 --timeout=120 -O "$NDK_CACHE_PATH/ndk.zip" "$NDK_URL"; then
+            echo "Download successful!"
+            # 验证文件完整性
+            if unzip -tq "$NDK_CACHE_PATH/ndk.zip"; then
+              echo "ZIP file integrity verified"
+              unzip -q "$NDK_CACHE_PATH/ndk.zip" -d "$NDK_CACHE_PATH"
+              break
+            else
+              echo "ZIP file corrupted, trying next mirror..."
+              rm -f "$NDK_CACHE_PATH/ndk.zip"
             fi
-            sleep 30
+          else
+            echo "Download failed, trying next mirror..."
+            rm -f "$NDK_CACHE_PATH/ndk.zip"
           fi
         done
+        
+        # 最终验证
+        if [ ! -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
+          echo "Error: All NDK download attempts failed!"
+          exit 1
+        fi
 
     - name: Build with Buildozer
       run: |
-        # 设置构建环境
-        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r${{ env.NDK_VERSION }}"
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
-        
-        # 显示环境信息（用于调试）
-        echo "Current working directory: $(pwd)"
-        echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
-        echo "PATH: $PATH"
-        
-        # 执行构建
         buildozer -v android debug
 
     - name: Upload APK artifact
