@@ -127,9 +127,8 @@ jobs:
           fi
         done
 
-    - name: Build with Buildozer
+    - name: Build with Buildozer (verbose)
       run: |
-        # 设置环境变量
         export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
         
@@ -137,8 +136,31 @@ jobs:
         echo "NDK contents:"
         ls "$ANDROID_NDK_HOME" | head -10
         
-        # 执行构建并捕获输出到日志文件
-        buildozer -v android debug 2>&1 | tee build_output.log
+        # 使用非常详细的模式运行，并保存完整日志
+        buildozer -v -v android debug 2>&1 | tee full_build_log.txt
+        
+        # 检查日志中的错误
+        if grep -i "error\|fail\|exception" full_build_log.txt; then
+          echo "Found errors in build log!"
+          exit 1
+        fi
+
+    - name: Check for APK in alternative locations
+      run: |
+        echo "Searching for APK files in common locations..."
+        find . -name "*.apk" -o -name "*.aab" | head -10 || true
+        
+        # 检查常见的构建输出目录
+        for path in \
+          "bin/*.apk" \
+          ".buildozer/android/platform/build-*/dists/*/build/outputs/apk/*/*.apk" \
+          "app/build/outputs/apk/*/*.apk"; do
+          if ls $path 1>/dev/null 2>&1; then
+            echo "Found APK in: $path"
+            ls -la $path
+            break
+          fi
+        done
 
     - name: Verify build output
       run: |
@@ -153,35 +175,18 @@ jobs:
           exit 1
         fi
 
-    - name: Prepare logs for upload
+    - name: Prepare detailed logs for analysis
       if: always()
       run: |
-        # 创建日志目录
-        mkdir -p artifacts_logs
-        
-        # 复制所有可能的日志文件
-        if [ -d ".buildozer" ]; then
-          echo "Copying .buildozer logs..."
-          find .buildozer -name "*.log" -exec cp {} artifacts_logs/ \; 2>/dev/null || true
-        else
-          echo ".buildozer directory not found"
-        fi
-        
-        # 复制构建输出日志
-        if [ -f "build_output.log" ]; then
-          echo "Copying build output log..."
-          cp build_output.log artifacts_logs/
-        fi
-        
+        mkdir -p diagnostic_logs
+        # 收集所有可能的日志文件
+        find . -name "*.log" -exec cp {} diagnostic_logs/ \; 2>/dev/null || true
+        # 复制详细构建日志
+        cp full_build_log.txt diagnostic_logs/ || true
         # 复制配置文件
-        if [ -f "buildozer.spec" ]; then
-          echo "Copying buildozer.spec..."
-          cp buildozer.spec artifacts_logs/
-        fi
-        
-        # 显示准备上传的日志文件
-        echo "Logs prepared for upload:"
-        ls -la artifacts_logs/ || true
+        cp buildozer.spec diagnostic_logs/ || true
+        echo "Diagnostic logs prepared:"
+        ls -la diagnostic_logs/
 
     - name: Upload APK artifact
       if: success()
@@ -196,56 +201,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-logs-${{ github.run_number }}
-        path: artifacts_logs/
+        path: diagnostic_logs/
         if-no-files-found: ignore
-    - name: Build with Buildozer (verbose)
-      run: |
-       export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
-       export PATH="$ANDROID_NDK_HOME:$PATH"
-    
-    # 使用非常详细的模式运行，并保存完整日志
-buildozer -v -v android debug 2>&1 | tee full_build_log.txt
-
-    # 检查日志中的错误
-    if grep -i "error\|fail\|exception" full_build_log.txt; then
-      echo "Found errors in build log!"
-      exit 1
-    fi
-
-     - name: Check for APK in alternative locations
-    run: |
-    echo "Searching for APK files in common locations..."
-    find . -name "*.apk" -o -name "*.aab" | head -10 || true
-    
-    # 检查常见的构建输出目录
-    for path in \
-      "bin/*.apk" \
-      ".buildozer/android/platform/build-*/dists/*/build/outputs/apk/*/*.apk" \
-      "app/build/outputs/apk/*/*.apk"; do
-      if ls $path 1>/dev/null 2>&1; then
-        echo "Found APK in: $path"
-        ls -la $path
-        break
-      fi
-    done
-
-    - name: Prepare detailed logs for analysis
-     if: always()
-     run: |
-    mkdir -p diagnostic_logs
-    # 收集所有可能的日志文件
-    find . -name "*.log" -exec cp {} diagnostic_logs/ \; 2>/dev/null || true
-    # 复制详细构建日志
-    cp full_build_log.txt diagnostic_logs/ || true
-    # 复制配置文件
-    cp buildozer.spec diagnostic_logs/ || true
-    echo "Diagnostic logs prepared:"
-    ls -la diagnostic_logs/
-
-    - name: Upload diagnostic logs
-    if: always()
-    uses: actions/upload-artifact@v4
-    with:
-    name: diagnostic-logs-${{ github.run_number }}
-    path: diagnostic_logs/
-    retention-days: 7
+        retention-days: 7
