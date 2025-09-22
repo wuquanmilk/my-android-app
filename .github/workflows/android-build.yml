@@ -202,5 +202,81 @@ jobs:
       with:
         name: build-logs-${{ github.run_number }}
         path: diagnostic_logs/
-        if-no-files-found: ignore
+    - name: Manually download and setup Android NDK
+  run: |
+    NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
+    mkdir -p $NDK_CACHE_PATH
+    
+    # 使用您提供的可靠镜像源
+    NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+    NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
+    
+    echo "Manually downloading NDK from: $NDK_URL"
+    
+    # 增强的重试机制
+    MAX_ATTEMPTS=5
+    for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
+      echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
+      
+      # 使用 curl 替代 wget，有时更稳定
+      if curl -L --progress-bar --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
+        echo "Download completed. Verifying file integrity..."
+        
+        # 验证文件完整性
+        if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
+          echo "ZIP file integrity verified. Extracting..."
+          
+          # 解压 NDK
+          unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+          
+          # 验证解压后的目录
+          if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
+            echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
+            
+            # 设置环境变量
+            echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+            echo "PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
+            
+            # 创建标志文件，告诉 Buildozer NDK 已安装
+            touch "$NDK_CACHE_PATH/ndk_installed"
+            break
+          else
+            echo "Error: Extraction succeeded but directory not found!"
+            rm -f "$NDK_ZIP_PATH"
+          fi
+        else
+          echo "Error: Downloaded ZIP file is corrupted or incomplete!"
+          rm -f "$NDK_ZIP_PATH"
+        fi
+      else
+        echo "Download attempt $attempt failed."
+        rm -f "$NDK_ZIP_PATH"
+      fi
+      
+      # 如果不是最后一次尝试，等待后重试
+      if [ $attempt -lt $MAX_ATTEMPTS ]; then
+        echo "Waiting 30 seconds before next attempt..."
+        sleep 30
+      else
+        echo "Error: All $MAX_ATTEMPTS download attempts failed!"
+        exit 1
+      fi
+    done
+
+    - name: Prevent Buildozer from downloading NDK
+    run: |
+    # 修改 Buildozer 的配置，防止它尝试下载 NDK
+    NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
+    
+    # 创建一个假的 NDK 目录结构，满足 Buildozer 的检查
+    if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
+      echo "NDK already installed, skipping download"
+      
+      # 创建一个假的下载完成标志
+      mkdir -p "$NDK_CACHE_PATH/ndk"
+      touch "$NDK_CACHE_PATH/ndk/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+    else
+      echo "Error: NDK not found after manual installation!"
+      exit 1
+    fi    if-no-files-found: ignore
         retention-days: 7
