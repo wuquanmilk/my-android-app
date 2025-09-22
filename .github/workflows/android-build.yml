@@ -4,6 +4,11 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "r28b"  # 使用更稳定的版本
+      MAX_ATTEMPTS: 5       # 最大重试次数
+      NDK_CACHE_PATH: ${{ github.workspace }}/.ndk_cache
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -13,48 +18,78 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install Buildozer and dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        # 安装所有必要的构建工具
-        sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev 
-        sudo apt-get install -y libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
-        sudo apt-get install -y automake m4
+        sudo apt-get install -y git zip unzip openjdk-17-jdk
+        sudo apt-get install -y autoconf automake libtool pkg-config
+        sudo apt-get install -y zlib1g-dev libncurses5-dev libncursesw5-dev
+        sudo apt-get install -y libtinfo5 cmake libffi-dev libssl-dev
+        sudo apt-get install -y wget unzip ccache
+
+    - name: Install Python dependencies
+      run: |
         pip install buildozer Cython==0.29.33 virtualenv
 
-    # 修复1: 手动下载并验证NDK
-    - name: Setup Android NDK
+    # 修复NDK下载问题
+    - name: Download and extract Android NDK
       run: |
         # 创建缓存目录
-        mkdir -p ~/.buildozer/android/platform
-        cd ~/.buildozer/android/platform
+        mkdir -p $NDK_CACHE_PATH
+        cd $NDK_CACHE_PATH
         
-        # 下载NDK (使用r23b版本，更稳定)
-        NDK_VERSION="r23b"
-        NDK_FILE="android-ndk-${NDK_VERSION}-linux.zip"
-        wget --tries=3 --waitretry=30 --retry-connrefused "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip" -O $NDK_FILE
+        NDK_URL="https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/android-ndk-${{ env.NDK_VERSION }}-linux.zip"
         
-        # 验证下载完整性
-        if [ ! -f "$NDK_FILE" ]; then
-          echo "❌ NDK下载失败"
+        echo "下载NDK: $NDK_URL"
+        echo "保存到: $NDK_ZIP_PATH"
+        
+        # 下载重试逻辑
+        for attempt in $(seq 1 ${{ env.MAX_ATTEMPTS }}); do
+          echo "尝试 #$attempt 下载NDK..."
+          wget --tries=3 --waitretry=30 --retry-connrefused "$NDK_URL" -O "$NDK_ZIP_PATH" || true
+          
+          # 检查ZIP文件完整性
+          if unzip -t "$NDK_ZIP_PATH" >/dev/null 2>&1; then
+            echo "ZIP文件验证成功"
+            break
+          else
+            echo "ZIP文件损坏或不完整，删除后重试..."
+            rm -f "$NDK_ZIP_PATH"
+            sleep 30
+          fi
+        done
+        
+        # 最终检查
+        if [ ! -f "$NDK_ZIP_PATH" ]; then
+          echo "❌ 错误：所有NDK下载尝试失败！"
           exit 1
         fi
         
         # 解压NDK
-        unzip -q $NDK_FILE
-        rm $NDK_FILE
+        echo "解压NDK..."
+        unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+        rm "$NDK_ZIP_PATH"
         
-        # 设置环境变量
-        echo "ANDROID_NDK_HOME=$(pwd)/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV
-        echo "NDK目录设置完成: $(pwd)/android-ndk-${NDK_VERSION}"
+        # 验证解压结果
+        NDK_DIR="$NDK_CACHE_PATH/android-ndk-${{ env.NDK_VERSION }}"
+        if [ -d "$NDK_DIR" ]; then
+          echo "✅ NDK成功安装到: $NDK_DIR"
+          echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
+        else
+          echo "❌ 错误：解压后找不到NDK目录！"
+          ls -la "$NDK_CACHE_PATH"
+          exit 1
+        fi
 
-    # 修复2: 更新autotools配置
-    - name: Update autotools configuration
+    # 修复autoconf错误
+    - name: Fix autoconf macro errors
       run: |
-        # 进入你的应用目录
-        cd testapps/your_app_name
+        # 安装缺失的宏
+        sudo apt-get install -y libtool-bin
+        libtoolize --force
         
-        # 查找并更新所有configure.ac文件
+        # 更新所有configure.ac文件
         find . -name 'configure.ac' -execdir sh -c '
           echo "处理目录: $(pwd)"
           # 备份原始文件
@@ -67,12 +102,35 @@ jobs:
           autoreconf -vif
         ' \;
 
+    - name: Prepare build environment
+      run: |
+        # 确保bin目录存在
+        mkdir -p testapps/your_app_name/bin
+        
+        # 设置环境变量
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
+
     - name: Build the APK
       run: |
         cd testapps/your_app_name
-        # 设置Buildozer使用我们下载的NDK
-        export ANDROID_NDK_HOME="$HOME/.buildozer/android/platform/android-ndk-r23b"
+        echo "使用NDK路径: $ANDROID_NDK_HOME"
+        
+        # 运行buildozer
         buildozer -v android debug
+        
+        # 检查APK文件是否存在
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "✅ 构建成功！找到APK文件。"
+          ls -la bin/*.apk
+        else
+          echo "❌ 错误：在bin/目录中找不到APK文件！"
+          echo "当前目录内容:"
+          ls -la
+          echo "bin目录内容:"
+          ls -la bin || true
+          exit 1
+        fi
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
