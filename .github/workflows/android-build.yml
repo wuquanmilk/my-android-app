@@ -1,12 +1,18 @@
-name: Android APK Builder with API 31
+name: Android APK Builder (NDK 28c + API 31)
 
 on:
-  workflow_dispatch: # Allow manual triggers
-  push: # Auto-trigger on push to main
-    branches: [ main ]
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+env:
+  NDK_VERSION: "28c"
+  ANDROID_API: 31
+  MIN_API: 21
+  BUILD_TOOLS: "34.0.0"
 
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -23,44 +29,7 @@ jobs:
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
           autoconf automake libtool \
-          libffi-dev libssl-dev
-
-    - name: Download Android NDK r28c (Mirror)
-      run: |
-        # 设置缓存路径
-        NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk"
-        mkdir -p $NDK_CACHE_PATH
-        
-        # 使用您提供的镜像地址
-        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r28c-linux.zip"
-        NDK_ZIP_PATH="$NDK_CACHE_PATH/android-ndk-r28c-linux.zip"
-        
-        echo "Downloading NDK from mirror: $NDK_URL"
-        
-        # 增强的重试机制
-        for i in {1..5}; do
-          echo "Attempt $i to download NDK..."
-          if wget --tries=3 --timeout=120 -O "$NDK_ZIP_PATH" "$NDK_URL"; then
-            echo "NDK downloaded successfully!"
-            break
-          else
-            echo "Download attempt $i failed."
-            rm -f "$NDK_ZIP_PATH" # 删除不完整文件
-            if [ $i -eq 5 ]; then
-              echo "All download attempts failed. Exiting."
-              exit 1
-            fi
-            sleep 30 # 重试前等待
-          fi
-        done
-        
-        # 解压到缓存目录
-        echo "Unzipping NDK..."
-        unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
-        
-        # 设置环境变量
-        echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r28c" >> $GITHUB_ENV
-        echo "PATH=$NDK_CACHE_PATH/android-ndk-r28c:$PATH" >> $GITHUB_ENV
+          libffi-dev libssl-dev git make
 
     - name: Install Buildozer and dependencies
       run: |
@@ -68,24 +37,109 @@ jobs:
         pip install --upgrade buildozer
         pip install --upgrade Cython==0.29.36
 
-    - name: Clean previous builds
+    - name: Initialize Buildozer
       run: |
-        buildozer android clean
-        # 确保缓存目录存在
-        mkdir -p $HOME/.buildozer/android/packages
+        # 初始化Buildozer配置
+        buildozer init
+        # 检查生成的配置文件
+        if [ -f "buildozer.spec" ]; then
+          echo "Buildozer initialized successfully"
+        else
+          echo "Buildozer initialization may have failed"
+          exit 1
+        fi
 
-    - name: Build APK with 16K alignment
+    - name: Download Android NDK (with enhanced retry)
       run: |
-        # 设置环境变量
-        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r28c"
-        export PATH="$ANDROID_NDK_HOME:$PATH"
+        # 设置NDK缓存路径
+        NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk"
+        mkdir -p $NDK_CACHE_PATH
         
-        # 开始构建
+        # 尝试多个下载源
+        NDK_URLS=(
+          "https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+          "https://repo.huaweicloud.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+        )
+        
+        for NDK_URL in "${NDK_URLS[@]}"; do
+          echo "Trying to download from: $NDK_URL"
+          if wget --tries=3 --timeout=120 -O "$NDK_CACHE_PATH/ndk.zip" "$NDK_URL"; then
+            echo "Successfully downloaded NDK from $NDK_URL"
+            # 解压NDK
+            unzip -q "$NDK_CACHE_PATH/ndk.zip" -d "$NDK_CACHE_PATH"
+            # 设置环境变量
+            echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+            echo "PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
+            break
+          else
+            echo "Failed to download from $NDK_URL"
+            rm -f "$NDK_CACHE_PATH/ndk.zip"
+          fi
+        done
+        
+        # 验证NDK是否成功下载和解压
+        if [ ! -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
+          echo "Error: All NDK download attempts failed!"
+          exit 1
+        fi
+
+    - name: Setup Android SDK
+      run: |
+        # 创建Android SDK目录
+        mkdir -p android-sdk
+        
+        # 下载命令行工具
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+        unzip -q cmdline-tools.zip -d android-sdk/cmdline-tools
+        mv android-sdk/cmdline-tools/cmdline-tools android-sdk/cmdline-tools/latest
+        
+        # 设置环境变量
+        echo "ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$GITHUB_WORKSPACE/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+        
+        # 接受许可协议
+        yes | sdkmanager --licenses
+        
+        # 安装必要的Android组件
+        sdkmanager "platforms;android-${{ env.ANDROID_API }}" \
+                   "build-tools;${{ env.BUILD_TOOLS }}" \
+                   "platform-tools"
+
+    - name: Build with Buildozer
+      run: |
+        # 设置Buildozer使用的NDK路径
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r${{ env.NDK_VERSION }}"
+        
+        # 打印调试信息
+        echo "Current working directory: $(pwd)"
+        echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "PATH: $PATH"
+        
+        # 检查.buildozer目录结构
+        if [ -d ".buildozer" ]; then
+          echo ".buildozer directory exists"
+          find ".buildozer" -type d | head -20
+        else
+          echo ".buildozer directory does not exist"
+        fi
+        
+        # 执行构建
         buildozer -v android debug
 
     - name: Upload APK artifact
-      if: always() # 即使构建失败也上传产物
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: android-apk
         path: bin/*.apk
+        retention-days: 7
+
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          .buildozer/**/*.log
+          *.log
