@@ -38,13 +38,33 @@ jobs:
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
           autoconf automake libtool \
-          libffi-dev libssl-dev git make p7zip-full curl
+          libffi-dev libssl-dev git make p7zip-full curl \
+          m4 libncurses-dev pkg-config gettext
 
     - name: Install Buildozer and dependencies
       run: |
         pip install --upgrade pip setuptools wheel
         pip install --upgrade buildozer
         pip install --upgrade Cython==0.29.36
+
+    - name: Update autoconf macros and regenerate scripts
+      run: |
+        echo "=== 更新 autoconf 宏和重新生成配置脚本 ==="
+        
+        # 查找并更新 configure.ac 文件
+        if [ -f "configure.ac" ] || [ -f "configure.in" ]; then
+          echo "找到 configure.ac 文件，运行 autoupdate..."
+          autoupdate
+          echo "autoupdate 完成"
+        else
+          echo "未找到 configure.ac 或 configure.in 文件，跳过 autoupdate"
+        fi
+        
+        # 重新生成所有配置脚本
+        echo "运行 autoreconf 重新生成配置脚本..."
+        autoreconf -fiv || echo "autoreconf 可能已完成部分工作"
+        
+        echo "Autotools 配置更新完成"
 
     - name: Verify and update buildozer.spec
       run: |
@@ -144,7 +164,18 @@ jobs:
         ls "$ANDROID_NDK_HOME" | head -10
         
         # 执行构建
-        buildozer -v android debug
+        buildozer -v android debug 2>&1 | tee build_output.log
+        
+        # 检查构建结果
+        if [ $? -eq 0 ]; then
+          echo "Build completed successfully!"
+        else
+          echo "Build failed! Checking for errors..."
+          if grep -i "error\|fail\|exception" build_output.log; then
+            echo "Found errors in build log!"
+            exit 1
+          fi
+        fi
 
     - name: Verify build output
       run: |
@@ -162,23 +193,25 @@ jobs:
     - name: Prepare logs for analysis
       if: always()
       run: |
-        # 创建专用日志目录，避免权限问题
-        mkdir -p build_logs
+        mkdir -p diagnostic_logs
         
-        # 安全地收集日志文件
-        find . -name "*.log" -exec cp {} build_logs/ \; 2>/dev/null || true
+        # 收集所有可能的日志文件
+        find . -name "*.log" -exec cp {} diagnostic_logs/ \; 2>/dev/null || true
+        
+        # 复制详细构建日志
+        cp build_output.log diagnostic_logs/ || true
         
         # 复制配置文件
-        cp buildozer.spec build_logs/ || true
+        cp buildozer.spec diagnostic_logs/ || true
         
-        echo "Logs prepared for upload:"
-        ls -la build_logs/ || true
+        echo "Diagnostic logs prepared:"
+        ls -la diagnostic_logs/
 
     - name: Upload APK artifact
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: android-apk
+        name: android-apk-${{ github.run_number }}
         path: bin/*.apk
         retention-days: 7
 
@@ -186,15 +219,15 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
-        path: build_logs/
+        name: build-logs-${{ github.run_number }}
+        path: diagnostic_logs/
         if-no-files-found: ignore
         retention-days: 7
 
     - name: Fallback - Direct p4a build
       if: failure()
       run: |
-        echo "=== Buildozer failed, trying direct python-for-android ==="
+        echo "=== Buildozer失败，尝试直接使用python-for-android ==="
         
         # 设置环境变量
         export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
