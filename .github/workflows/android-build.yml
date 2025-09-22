@@ -1,4 +1,4 @@
-name: Android APK Build (NDK r28c + 16K Alignment)
+name: Android APK Build (Fixed Autotools + NDK)
 
 on:
   workflow_dispatch:  # 允许手动触发
@@ -11,11 +11,10 @@ on:
       - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "28c"           # NDK 版本简称 (用于URL)
-  NDK_FULL_VERSION: "28.2.13676358" # NDK 完整版本号 (用于buildozer.spec)
+  NDK_VERSION: "28c"
+  NDK_FULL_VERSION: "28.2.13676358"
   ANDROID_API: 31
   MIN_API: 21
-  BUILD_TOOLS: "34.0.0"
   PYTHON_VERSION: "3.9"
 
 jobs:
@@ -32,7 +31,7 @@ jobs:
       with:
         python-version: '${{ env.PYTHON_VERSION }}'
 
-    - name: Install system dependencies
+    - name: Install system dependencies (包括完整的Autotools)
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -47,24 +46,20 @@ jobs:
         pip install --upgrade buildozer
         pip install --upgrade Cython==0.29.36
 
-    - name: Update autoconf macros and regenerate scripts
+    - name: Fix Autotools configuration
       run: |
-        echo "=== 更新 autoconf 宏和重新生成配置脚本 ==="
+        echo "=== 修复 Autotools 配置 ==="
         
-        # 查找并更新 configure.ac 文件
+        # 检查并修复 configure.ac 文件
         if [ -f "configure.ac" ] || [ -f "configure.in" ]; then
-          echo "找到 configure.ac 文件，运行 autoupdate..."
-          autoupdate
-          echo "autoupdate 完成"
+          echo "找到 configure.ac 文件，运行 autoupdate 更新宏..."
+          autoupdate || echo "autoupdate 可能已完成部分工作"
+          
+          echo "运行 autoreconf 重新生成配置脚本..."
+          autoreconf -fiv || echo "autoreconf 可能已完成部分工作"
         else
-          echo "未找到 configure.ac 或 configure.in 文件，跳过 autoupdate"
+          echo "未找到 configure.ac 或 configure.in 文件，跳过 Autotools 步骤"
         fi
-        
-        # 重新生成所有配置脚本
-        echo "运行 autoreconf 重新生成配置脚本..."
-        autoreconf -fiv || echo "autoreconf 可能已完成部分工作"
-        
-        echo "Autotools 配置更新完成"
 
     - name: Verify and update buildozer.spec
       run: |
@@ -90,46 +85,41 @@ jobs:
           echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
           echo "Added 16K memory alignment configuration"
         fi
-        
-        # 显示最终配置
-        echo "Current buildozer.spec configuration:"
-        grep -E "(android.ndk|android.extra_ldflags)" buildozer.spec || true
 
-    - name: Download Android NDK (Enhanced Reliability)
+    - name: Download Android NDK manually (可靠镜像)
       run: |
+        echo "=== 手动下载 Android NDK ==="
+        
         NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
         mkdir -p $NDK_CACHE_PATH
         
         # 使用可靠的镜像源
         NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
+        NDK_ZIP_PATH="/tmp/ndk.zip"
         
         echo "Downloading from reliable mirror: $NDK_URL"
         
         # 增强的重试机制
-        MAX_ATTEMPTS=5
+        MAX_ATTEMPTS=3
         for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
           echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
           
-          # 使用curl下载，显示进度，设置超时和重试
           if curl -L --progress-bar --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
             echo "Download completed. Verifying file integrity..."
             
-            # 验证ZIP文件完整性
             if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
               echo "ZIP file integrity verified. Extracting..."
               
-              # 解压NDK
+              # 解压到 Buildozer 期望的位置
               unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+              rm -f "$NDK_ZIP_PATH"
               
               # 验证解压后的目录
               if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
                 echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
-                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
                 break
               else
                 echo "Error: Extraction succeeded but directory not found!"
-                rm -f "$NDK_ZIP_PATH"
               fi
             else
               echo "Error: Downloaded ZIP file is corrupted or incomplete!"
@@ -140,18 +130,29 @@ jobs:
             rm -f "$NDK_ZIP_PATH"
           fi
           
-          # 如果不是最后一次尝试，等待后重试
           if [ $attempt -lt $MAX_ATTEMPTS ]; then
             echo "Waiting 30 seconds before next attempt..."
             sleep 30
           else
-            echo "Error: All $MAX_ATTEMPTS download attempts failed!"
-            echo "Please check:"
-            echo "1. The mirror URL availability: $NDK_URL"
-            echo "2. Network connectivity"
+            echo "Error: All download attempts failed!"
             exit 1
           fi
         done
+
+    - name: Set up environment variables
+      run: |
+        echo "=== 设置环境变量 ==="
+        
+        # 设置 NDK 路径
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
+        export PATH="$ANDROID_NDK_HOME:$PATH"
+        
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
+        
+        echo "NDK path: $ANDROID_NDK_HOME"
+        echo "NDK contents:"
+        ls "$ANDROID_NDK_HOME" | head -5
 
     - name: Build with Buildozer
       run: |
@@ -160,8 +161,6 @@ jobs:
         export PATH="$ANDROID_NDK_HOME:$PATH"
         
         echo "Using NDK path: $ANDROID_NDK_HOME"
-        echo "NDK contents:"
-        ls "$ANDROID_NDK_HOME" | head -10
         
         # 执行构建
         buildozer -v android debug 2>&1 | tee build_output.log
@@ -185,9 +184,28 @@ jobs:
           echo "File size: $(du -h "$APK_FILE" | cut -f1)"
         else
           echo "Error: No APK file found in bin/ directory!"
-          echo "Contents of bin/:"
-          ls -la bin/ || true
-          exit 1
+          echo "Trying alternative locations..."
+          
+          # 检查其他可能的位置
+          find . -name "*.apk" -o -name "*.aab" | head -10 || true
+          
+          # 检查常见的构建输出目录
+          for path in \
+            ".buildozer/android/platform/build-*/dists/*/build/outputs/apk/*/*.apk" \
+            "app/build/outputs/apk/*/*.apk"; do
+            if ls $path 1>/dev/null 2>&1; then
+              echo "Found APK in: $path"
+              ls -la $path
+              # 复制到标准位置
+              mkdir -p bin
+              cp $(ls $path | head -1) bin/
+              break
+            fi
+          done
+          
+          if ! ls bin/*.apk 1> /dev/null 2>&1; then
+            exit 1
+          fi
         fi
 
     - name: Prepare logs for analysis
@@ -211,7 +229,7 @@ jobs:
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: android-apk-${{ github.run_number }}
+        name: android-apk
         path: bin/*.apk
         retention-days: 7
 
@@ -219,12 +237,12 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs-${{ github.run_number }}
+        name: build-logs
         path: diagnostic_logs/
         if-no-files-found: ignore
         retention-days: 7
 
-    - name: Fallback - Direct p4a build
+    - name: Fallback - Direct python-for-android build
       if: failure()
       run: |
         echo "=== Buildozer失败，尝试直接使用python-for-android ==="
@@ -256,3 +274,4 @@ jobs:
           echo "P4A build also failed!"
           exit 1
         fi
+
