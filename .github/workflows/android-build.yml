@@ -48,15 +48,12 @@ jobs:
 
     - name: Setup Android SDK and NDK
       run: |
-        # 创建必要的目录
         mkdir -p ~/.android
         mkdir -p ~/.buildozer/android/platform
-
-        # 接受 Android SDK 许可证
+        
         echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/android-sdk-license
         echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" >> ~/.android/android-sdk-license
 
-        # 下载并设置 NDK r25b
         NDK_URL="https://dl.google.com/android/repository/android-ndk-r25b-linux.zip"
         NDK_DIR="$HOME/.buildozer/android/packages/android-ndk-r25b"
         
@@ -65,7 +62,6 @@ jobs:
           wget -q $NDK_URL -O ndk.zip
           unzip -q ndk.zip -d ~/.buildozer/android/packages/
           rm ndk.zip
-          # 确保目录名称正确
           mv ~/.buildozer/android/packages/android-ndk-r25b ~/.buildozer/android/packages/android-ndk-r25b
         fi
 
@@ -79,11 +75,9 @@ jobs:
           echo "Created new buildozer.spec"
         fi
 
-        # 更新 NDK 配置
         sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec
         sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}|" buildozer.spec
         
-        # 确保关键配置存在
         if ! grep -q "android.extra_ldflags" buildozer.spec; then
           echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
         fi
@@ -104,7 +98,6 @@ jobs:
         echo "Using NDK path: $ANDROID_NDK_HOME"
         echo "Building with Buildozer..."
         
-        # 使用更详细的日志输出
         buildozer -v android clean
         buildozer -v android debug 2>&1 | tee build.log
 
