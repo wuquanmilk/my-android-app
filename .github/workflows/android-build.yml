@@ -12,7 +12,6 @@ on:
 
 env:
   NDK_VERSION: "28c"
-  NDK_FULL_VERSION: "28.2.13676358"
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
@@ -32,12 +31,12 @@ jobs:
       with:
         python-version: '${{ env.PYTHON_VERSION }}'
 
-    - name: Install system dependencies
+    - name: Install build dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
-          autoconf automake libtool pkg-config \
+          autoconf automake libtool pkg-config m4 \
           autoconf-archive \
           libffi-dev libssl-dev git make p7zip-full curl zlib1g-dev
 
@@ -49,42 +48,34 @@ jobs:
 
     - name: Verify and update buildozer.spec
       run: |
-        if [ ! -f "buildozer.spec" ]; then
-          buildozer init
-        fi
+        if [ ! -f "buildozer.spec" ]; then buildozer init; fi
+        sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec || echo "android.ndk = ${{ env.NDK_VERSION }}" >> buildozer.spec
+        sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}|" buildozer.spec || echo "android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}" >> buildozer.spec
+        grep -q "android.extra_ldflags" buildozer.spec || echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
 
-        sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec || \
-          echo "android.ndk = ${{ env.NDK_VERSION }}" >> buildozer.spec
-
-        sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}|" buildozer.spec || \
-          echo "android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}" >> buildozer.spec
-
-        grep -q "android.extra_ldflags" buildozer.spec || \
-          echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
-
-    - name: Download Android NDK (Enhanced Reliability)
+    - name: Download Android NDK r28c
       run: |
-        NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
-        mkdir -p $NDK_CACHE_PATH
-        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
+        NDK_CACHE="$HOME/.buildozer/android/packages"
+        mkdir -p $NDK_CACHE
+        NDK_ZIP="$NDK_CACHE/ndk.zip"
+        NDK_URL="https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
 
         MAX_ATTEMPTS=5
-        for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
-          if curl -L --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
-            if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
-              unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
-              echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-              break
-            fi
-          fi
-          if [ $attempt -eq $MAX_ATTEMPTS ]; then
-            exit 1
-          fi
+        for ((i=1;i<=MAX_ATTEMPTS;i++)); do
+          echo "Download attempt $i"
+          wget --tries=3 --retry-connrefused -O "$NDK_ZIP" "$NDK_URL"
+          unzip -tq "$NDK_ZIP" && break
+          echo "Download or zip test failed, retrying..."
+          rm -f "$NDK_ZIP"
           sleep 10
+          if [ $i -eq $MAX_ATTEMPTS ]; then echo "NDK download failed"; exit 1; fi
         done
 
-    - name: Patch libffi for Autoconf / Libtool compatibility
+        unzip -qq "$NDK_ZIP" -d "$NDK_CACHE"
+        export ANDROID_NDK_HOME="$NDK_CACHE/android-ndk-r${{ env.NDK_VERSION }}"
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+
+    - name: Patch libffi for Autoconf/Libtool
       run: |
         LIBFFI_DIR="$HOME/.buildozer/android/build/libffi"
         if [ -d "$LIBFFI_DIR" ]; then
@@ -94,9 +85,10 @@ jobs:
           libtoolize --force --copy
           aclocal -I m4
           autoreconf -fi
+          echo "libffi patched successfully"
         fi
 
-    - name: Build with Buildozer
+    - name: Build APK with Buildozer
       run: |
         export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
@@ -106,12 +98,12 @@ jobs:
       run: |
         if ls bin/*.apk 1> /dev/null 2>&1; then
           APK_FILE=$(ls bin/*.apk | head -1)
-          echo "Build successful! APK file: $APK_FILE"
+          echo "Build successful: $APK_FILE"
         else
-          exit 1
+          echo "No APK generated"; exit 1
         fi
 
-    - name: Prepare logs for analysis
+    - name: Prepare logs
       if: always()
       run: |
         mkdir -p build_logs
@@ -149,9 +141,8 @@ jobs:
           --ndk-path "$ANDROID_NDK_HOME" \
           --debug
         if ls dist/*.apk 1> /dev/null 2>&1; then
-          APK_FILE=$(ls dist/*.apk | head -1)
           mkdir -p bin
-          cp "$APK_FILE" bin/
+          cp $(ls dist/*.apk | head -1) bin/
         else
-          exit 1
+          echo "Direct p4a build failed"; exit 1
         fi
