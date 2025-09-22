@@ -1,8 +1,8 @@
 name: Android APK Build (Stable - NDK r28c)
 
 on:
-  workflow_dispatch:  # 允许手动触发
-  push:               # 推送代码时自动触发
+  workflow_dispatch:
+  push:
     branches: [ main ]
     paths:
       - '**.py'
@@ -11,8 +11,8 @@ on:
       - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "28c"           # NDK 版本简称 (用于URL)
-  NDK_FULL_VERSION: "28.2.13676358" # NDK 完整版本号 (用于buildozer.spec)
+  NDK_VERSION: "28c"
+  NDK_FULL_VERSION: "28.2.13676358"
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
@@ -48,7 +48,6 @@ jobs:
 
     - name: Verify and update buildozer.spec
       run: |
-        # 确保 buildozer.spec 存在且配置正确
         if [ ! -f "buildozer.spec" ]; then
           buildozer init
           echo "Created new buildozer.spec"
@@ -56,56 +55,45 @@ jobs:
           echo "buildozer.spec already exists"
         fi
         
-        # 更新或添加 NDK 配置
+        # 使用 NDK 简称而不是完整版本号
         if grep -q "android.ndk" buildozer.spec; then
-          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
-          echo "Updated NDK version to ${{ env.NDK_FULL_VERSION }}"
+          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec
+          echo "Updated NDK version to ${{ env.NDK_VERSION }}"
         else
-          echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
+          echo "android.ndk = ${{ env.NDK_VERSION }}" >> buildozer.spec
           echo "Added NDK configuration"
         fi
         
-        # 显示最终配置
         echo "Current buildozer.spec NDK setting:"
         grep "android.ndk" buildozer.spec || true
 
-    - name: Manually download and setup Android NDK
+    - name: Manually download Android NDK
       run: |
         NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
         mkdir -p $NDK_CACHE_PATH
         
-        # 使用您提供的可靠镜像源
+        # 使用您提供的镜像源
         NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
         NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
         
-        echo "Manually downloading NDK from: $NDK_URL"
+        echo "Downloading from your mirror: $NDK_URL"
         
         # 增强的重试机制
         MAX_ATTEMPTS=5
         for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
           echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
           
-          # 使用 curl 替代 wget，有时更稳定
           if curl -L --progress-bar --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
             echo "Download completed. Verifying file integrity..."
             
-            # 验证文件完整性
             if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
               echo "ZIP file integrity verified. Extracting..."
               
-              # 解压 NDK
               unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
               
-              # 验证解压后的目录
               if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
                 echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
-                
-                # 设置环境变量
-                echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-                echo "PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
-                
-                # 创建标志文件，告诉 Buildozer NDK 已安装
-                touch "$NDK_CACHE_PATH/ndk_installed"
+                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
                 break
               else
                 echo "Error: Extraction succeeded but directory not found!"
@@ -120,7 +108,6 @@ jobs:
             rm -f "$NDK_ZIP_PATH"
           fi
           
-          # 如果不是最后一次尝试，等待后重试
           if [ $attempt -lt $MAX_ATTEMPTS ]; then
             echo "Waiting 30 seconds before next attempt..."
             sleep 30
@@ -130,22 +117,47 @@ jobs:
           fi
         done
 
-    - name: Prevent Buildozer from downloading NDK
+    - name: Patch Buildozer to prevent NDK download
       run: |
-        # 修改 Buildozer 的配置，防止它尝试下载 NDK
-        NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
+        # 找到 Buildozer 的 Android 目标模块
+        BUILDozer_PATH=$(python -c "import buildozer.targets.android as a; print(a.__file__)" | sed 's/__init__.py//')
+        echo "Buildozer Android module path: $BUILDozer_PATH"
         
-        # 创建一个假的 NDK 目录结构，满足 Buildozer 的检查
-        if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
-          echo "NDK already installed, skipping download"
-          
-          # 创建一个假的下载完成标志
-          mkdir -p "$NDK_CACHE_PATH/ndk"
-          touch "$NDK_CACHE_PATH/ndk/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        else
-          echo "Error: NDK not found after manual installation!"
-          exit 1
-        fi
+        # 备份原始文件
+        cp "$BUILDozer_PATH/android.py" "$BUILDozer_PATH/android.py.backup"
+        
+        # 使用 Python 脚本修改 Buildozer 源码
+        python << EOF
+import re
+
+with open("$BUILDozer_PATH/android.py", "r") as f:
+    content = f.read()
+
+# 修改 _install_android_ndk 方法，使其跳过下载
+patched_content = re.sub(
+    r"def _install_android_ndk\(self\):",
+    r'''def _install_android_ndk(self):
+        # PATCHED: Skip NDK download as it's already installed manually
+        import os
+        ndk_path = f'{self.buildozer.user_home_dir}/.buildozer/android/packages/android-ndk-r{self.android_ndk}'
+        if os.path.exists(ndk_path):
+            self.buildozer.info("NDK already installed manually, skipping download")
+            return
+        else:
+            self.buildozer.error(f"NDK not found at {ndk_path}")
+            raise Exception("Manual NDK installation failed")''',
+    content
+)
+
+with open("$BUILDozer_PATH/android.py", "w") as f:
+    f.write(patched_content)
+
+print("Buildozer patched successfully!")
+EOF
+
+        # 验证修改
+        echo "Patch verification:"
+        grep -A 15 "def _install_android_ndk" "$BUILDozer_PATH/android.py" || true
 
     - name: Build with Buildozer (verbose)
       run: |
@@ -165,28 +177,11 @@ jobs:
           exit 1
         fi
 
-    - name: Check for APK in alternative locations
-      run: |
-        echo "Searching for APK files in common locations..."
-        find . -name "*.apk" -o -name "*.aab" | head -10 || true
-        
-        # 检查常见的构建输出目录
-        for path in \
-          "bin/*.ap极" \
-          ".buildozer/android/platform/build-*/dists/*/build/outputs/apk/*/*.apk" \
-          "app/build/outputs/apk/*/*.apk"; do
-          if ls $path 1>/dev/null 2>&1; then
-            echo "Found APK in: $path"
-            ls -la $path
-            break
-          fi
-        done
-
     - name: Verify build output
       run: |
         if ls bin/*.apk 1> /dev/null 2>&1; then
-          APK_FILE=$(ls bin/*.apk极 | head -1)
-          echo极 "Build successful! APK file: $APK_FILE"
+          APK_FILE=$(ls bin/*.apk | head -1)
+          echo "Build successful! APK file: $APK_FILE"
           echo "File size: $(du -h "$APK_FILE" | cut -f1)"
         else
           echo "Error: No APK file found in bin/ directory!"
