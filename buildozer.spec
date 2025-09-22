@@ -5,15 +5,16 @@ package.domain = org.example
 source.dir = .
 version = 1.0
 
-# 修正依赖版本
-requirements = python3, kivy, cython==0.29.36, libffi
+# 修正 requirements，去掉 libffi（p4a 自带）
+requirements = python3, kivy, cython==0.29.36
+
 orientation = portrait
 fullscreen = 0
 
-# 修正API和NDK配置
+# API 和 NDK 配置
 android.api = 31
 android.minapi = 21
-android.ndk = 28c  # 使用简称而不是完整版本号
+android.ndk = 28c
 android.ndk_api = 21
 android.archs = arm64-v8a
 android.use_precompiled = True
@@ -22,14 +23,12 @@ android.precompiled_dir = ./precompiled
 android.enable_androidx = True
 android.enable_jetifier = True
 
+# 优化编译和 16K 对齐
 android.extra_cflags = -O2 -fPIC -DNDEBUG
 android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384
 
 source.include_exts = py,png,jpg,kv,ttf,otf,json,xml,ttc,woff,woff2
 source.include_dirs = fonts,images,data,assets
-
-# 移除android.sdk=28（这个配置不正确）
-# android.sdk = 28
 
 android.manifest = <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -66,7 +65,6 @@ android.manifest = <?xml version="1.0" encoding="utf-8"?>
 </manifest>
 
 log_level = 2
-
 android.accept_sdk_license = True
 
 [buildozer]
