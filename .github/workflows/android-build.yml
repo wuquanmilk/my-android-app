@@ -1,55 +1,217 @@
-name: Android APK Build with NDK r28c
+name: Android APK Build (NDK r28c + 16K Alignment)
 
-on: [workflow_dispatch, push]
+on:
+  workflow_dispatch:  # 允许手动触发
+  push:               # 推送代码时自动触发
+    branches: [ main ]
+    paths:
+      - '**.py'
+      - '**.kv'
+      - 'buildozer.spec'
+      - '.github/workflows/**'
 
 env:
-  NDK_VERSION: "28c"           # 用于下载
-  NDK_FULL_VERSION: "28.2.13676358" # 用于buildozer.spec
+  NDK_VERSION: "28c"           # NDK 版本简称 (用于URL)
+  NDK_FULL_VERSION: "28.2.13676358" # NDK 完整版本号 (用于buildozer.spec)
+  ANDROID_API: 31
+  MIN_API: 21
+  BUILD_TOOLS: "34.0.0"
+  PYTHON_VERSION: "3.9"
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '${{ env.PYTHON_VERSION }}'
 
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y wget unzip openjdk-17-jdk
+        sudo apt-get install -y \
+          wget unzip openjdk-17-jdk \
+          autoconf automake libtool \
+          libffi-dev libssl-dev git make p7zip-full curl
 
-    - name: Install Buildozer
-      run: pip install buildozer
-
-    - name: Ensure NDK configuration in buildozer.spec
+    - name: Install Buildozer and dependencies
       run: |
-        # 确保使用NDK r28c的完整版本号
-        if grep -q "android.ndk" buildozer.spec; then
-          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
+        pip install --upgrade pip setuptools wheel
+        pip install --upgrade buildozer
+        pip install --upgrade Cython==0.29.36
+
+    - name: Verify and update buildozer.spec
+      run: |
+        # 确保 buildozer.spec 存在且配置正确
+        if [ ! -f "buildozer.spec" ]; then
+          buildozer init
+          echo "Created new buildozer.spec"
         else
-          echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
+          echo "buildozer.spec already exists"
         fi
         
-        # 添加16K对齐标志
+        # 更新或添加 NDK 配置
+        if grep -q "android.ndk" buildozer.spec; then
+          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
+          echo "Updated NDK version to ${{ env.NDK_FULL_VERSION }}"
+        else
+          echo "android.ndk = ${{ env.NDK_FULL_VERSION }}" >> buildozer.spec
+          echo "Added NDK configuration"
+        fi
+        
+        # 添加 16K 内存对齐配置
         if ! grep -q "android.extra_ldflags" buildozer.spec; then
           echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
+          echo "Added 16K memory alignment configuration"
         fi
+        
+        # 显示最终配置
+        echo "Current buildozer.spec configuration:"
+        grep -E "(android.ndk|android.extra_ldflags)" buildozer.spec || true
 
-    - name: Build with Buildozer
+    - name: Download Android NDK (Enhanced Reliability)
       run: |
-        buildozer android debug
+        NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
+        mkdir -p $NDK_CACHE_PATH
+        
+        # 使用您提供的可靠镜像源
+        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
+        
+        echo "Downloading from your mirror: $NDK_URL"
+        
+        # 增强的重试机制
+        MAX_ATTEMPTS=5
+        for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
+          echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
+          
+          # 使用curl下载，显示进度，设置超时和重试
+          if curl -L --progress-bar --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
+            echo "Download completed. Verifying file integrity..."
+            
+            # 验证ZIP文件完整性
+            if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
+              echo "ZIP file integrity verified. Extracting..."
+              
+              # 解压NDK
+              unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+              
+              # 验证解压后的目录
+              if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
+                echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
+                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+                break
+              else
+                echo "Error: Extraction succeeded but directory not found!"
+                rm -f "$NDK_ZIP_PATH"
+              fi
+            else
+              echo "Error: Downloaded ZIP file is corrupted or incomplete!"
+              rm -f "$NDK_ZIP_PATH"
+            fi
+          else
+            echo "Download attempt $attempt failed."
+            rm -f "$NDK_ZIP_PATH"
+          fi
+          
+          # 如果不是最后一次尝试，等待后重试
+          if [ $attempt -lt $MAX_ATTEMPTS ]; then
+            echo "Waiting 30 seconds before next attempt..."
+            sleep 30
+          else
+            echo "Error: All $MAX_ATTEMPTS download attempts failed!"
+            echo "Please check:"
+            echo "1. The mirror URL availability: $NDK_URL"
+            echo "2. Network connectivity"
+            exit 1
+          fi
+        done
 
-    - name: Check for APK
+    - name: Build with Buildozer (verbose)
       run: |
-        if ls bin/*.apk 1> /dev/null 2>&1; then
-          echo "Build successful!"
-          ls -la bin/*.apk
-        else
-          echo "Build failed - no APK found"
+        # 设置环境变量
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
+        export PATH="$ANDROID_NDK_HOME:$PATH"
+        
+        echo "Using NDK path: $ANDROID_NDK_HOME"
+        echo "NDK contents:"
+        ls "$ANDROID_NDK_HOME" | head -10
+        
+        # 执行构建并捕获输出到日志文件
+        buildozer -v android debug 2>&1 | tee full_build_log.txt
+        
+        # 检查日志中的错误
+        if grep -i "error\|fail\|exception" full_build_log.txt; then
+          echo "Found errors in build log!"
           exit 1
         fi
+
+    - name: Verify build output
+      run: |
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          APK_FILE=$(ls bin/*.apk | head -1)
+          echo "Build successful! APK file: $APK_FILE"
+          echo "File size: $(du -h "$APK_FILE" | cut -f1)"
+        else
+          echo "Error: No APK file found in bin/ directory!"
+          echo "Contents of bin/:"
+          ls -la bin/ || true
+          exit 1
+        fi
+
+    - name: Check for APK in alternative locations
+      run: |
+        echo "Searching for APK files in common locations..."
+        find . -name "*.apk" -o -name "*.aab" | head -10 || true
+        
+        # 检查常见的构建输出目录
+        for path in \
+          "bin/*.apk" \
+          ".buildozer/android/platform/build-*/dists/*/build/outputs/apk/*/*.apk" \
+          "app/build/outputs/apk/*/*.apk"; do
+          if ls $path 1>/dev/null 2>&1; then
+            echo "Found APK in: $path"
+            ls -la $path
+            break
+          fi
+        done
+
+    - name: Prepare detailed logs for analysis
+      if: always()
+      run: |
+        mkdir -p diagnostic_logs
+        
+        # 收集所有可能的日志文件
+        find . -name "*.log" -exec cp {} diagnostic_logs/ \; 2>/dev/null || true
+        
+        # 复制详细构建日志
+        cp full_build_log.txt diagnostic_logs/ || true
+        
+        # 复制配置文件
+        cp buildozer.spec diagnostic_logs/ || true
+        
+        echo "Diagnostic logs prepared:"
+        ls -la diagnostic_logs/
+
+    - name: Upload APK artifact
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk-${{ github.run_number }}
+        path: bin/*.apk
+        retention-days: 7
+
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ github.run_number }}
+        path: diagnostic_logs/
+        if-no-files-found: ignore
+        retention-days: 7
