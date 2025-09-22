@@ -43,10 +43,15 @@ jobs:
         buildozer init
         # 检查生成的配置文件
         if [ -f "buildozer.spec" ]; then
-          echo "Buildozer initialized successfully"
-        else
-          echo "Buildozer initialization may have failed"
-          exit 1
+        echo "buildozer.spec already exists, skipping initialization"
+         else
+         buildozer init
+         if [ $? -eq 0 ]; then
+         echo "Buildozer initialized successfully"
+         else
+         echo "Buildozer initialization failed"
+         exit 1
+         fi
         fi
 
     - name: Download Android NDK (with enhanced retry)
