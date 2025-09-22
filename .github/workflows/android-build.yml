@@ -198,22 +198,22 @@ jobs:
         name: build-logs-${{ github.run_number }}
         path: artifacts_logs/
         if-no-files-found: ignore
-- name: Build with Buildozer (verbose)
-  run: |
-    export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
-    export PATH="$ANDROID_NDK_HOME:$PATH"
+    - name: Build with Buildozer (verbose)
+      run: |
+       export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
+       export PATH="$ANDROID_NDK_HOME:$PATH"
     
     # 使用非常详细的模式运行，并保存完整日志
-    buildozer -v -v android debug 2>&1 | tee full_build_log.txt
-    
+buildozer -v -v android debug 2>&1 | tee full_build_log.txt
+
     # 检查日志中的错误
     if grep -i "error\|fail\|exception" full_build_log.txt; then
       echo "Found errors in build log!"
       exit 1
     fi
 
-- name: Check for APK in alternative locations
-  run: |
+     - name: Check for APK in alternative locations
+    run: |
     echo "Searching for APK files in common locations..."
     find . -name "*.apk" -o -name "*.aab" | head -10 || true
     
@@ -229,9 +229,9 @@ jobs:
       fi
     done
 
-- name: Prepare detailed logs for analysis
-  if: always()
-  run: |
+    - name: Prepare detailed logs for analysis
+     if: always()
+     run: |
     mkdir -p diagnostic_logs
     # 收集所有可能的日志文件
     find . -name "*.log" -exec cp {} diagnostic_logs/ \; 2>/dev/null || true
@@ -242,10 +242,10 @@ jobs:
     echo "Diagnostic logs prepared:"
     ls -la diagnostic_logs/
 
-- name: Upload diagnostic logs
-  if: always()
-  uses: actions/upload-artifact@v4
-  with:
+    - name: Upload diagnostic logs
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
     name: diagnostic-logs-${{ github.run_number }}
     path: diagnostic_logs/
     retention-days: 7
