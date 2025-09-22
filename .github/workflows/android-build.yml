@@ -21,7 +21,7 @@ env:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 50 # 稍长的超时时间，适应NDK下载
+    timeout-minutes: 50
 
     steps:
     - name: Checkout code
@@ -53,7 +53,6 @@ jobs:
           echo "Buildozer initialized successfully"
         else
           echo "buildozer.spec already exists, checking configuration..."
-          # 确保spec文件中的NDK版本与工作流一致
           if grep -q "android.ndk" buildozer.spec; then
             sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_FULL_VERSION }}|" buildozer.spec
             echo "Updated buildozer.spec to use NDK ${{ env.NDK_FULL_VERSION }}"
@@ -63,18 +62,16 @@ jobs:
           fi
         fi
 
-    - name: Download Android NDK (Official Source with Enhanced Retry)
+    - name: Download Android NDK (Using Your Mirror)
       run: |
         NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
         mkdir -p $NDK_CACHE_PATH
         
-        # 官方下载URL (仅使用官方源)
-        NDK_URL="https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip"
+        # 使用您提供的镜像源
+        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
         NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
         
-        echo "Target NDK version: ${{ env.NDK_VERSION }}"
-        echo "Download URL: $NDK_URL"
-        echo "Cache path: $NDK_CACHE_PATH"
+        echo "Using your mirror: $NDK_URL"
         
         # 增强的重试机制
         MAX_ATTEMPTS=5
@@ -93,9 +90,9 @@ jobs:
               unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
               
               # 验证解压后的目录
-              if [ -d "$NDK_CACHE_PATH/android-ndk-${{ env.NDK_VERSION }}" ]; then
+              if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
                 echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
-                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
                 exit 0
               else
                 echo "Error: Extraction succeeded but directory not found!"
@@ -118,14 +115,14 @@ jobs:
         
         echo "Error: All $MAX_ATTEMPTS download attempts failed!"
         echo "Please check:"
-        echo "1. Network connectivity to dl.google.com"
-        echo "2. The NDK version availability"
+        echo "1. The mirror URL availability: $NDK_URL"
+        echo "2. Network connectivity"
         exit 1
 
     - name: Build with Buildozer
       run: |
         # 设置环境变量
-        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-${{ env.NDK_VERSION }}"
+        export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
         
         echo "Using NDK path: $ANDROID_NDK_HOME"
