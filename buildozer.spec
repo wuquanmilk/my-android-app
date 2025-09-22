@@ -10,11 +10,11 @@ requirements = python3, kivy, cython==0.29.36, libffi
 orientation = portrait
 fullscreen = 0
 
-# 修正API和NDK配置
+# 修正API和NDK配置 - 改为r25b
 android.api = 31
 android.minapi = 21
-android.ndk = 28c
-android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r28c
+android.ndk = 25b  # 从28c改为25b
+android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r25b  # 从r28c改为r25b
 android.ndk_api = 21
 android.archs = arm64-v8a
 android.use_precompiled = True
@@ -30,9 +30,7 @@ android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384
 source.include_exts = py,png,jpg,kv,ttf,otf,json,xml,ttc,woff,woff2
 source.include_dirs = fonts,images,data,assets
 
-# 移除android.sdk=28（不正确配置）
-
-# 自定义 AndroidManifest
+# 自定义 AndroidManifest - 修复XML命名空间
 android.manifest = <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.example.myapp"
@@ -60,7 +58,7 @@ android.manifest = <?xml version="1.0" encoding="utf-8"?>
             android:exported="true">
             
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
+                <action android:name极速加速器="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
