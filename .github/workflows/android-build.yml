@@ -1,7 +1,7 @@
 name: Android APK Build (NDK r28c + 16K Alignment)
 
 on:
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:  # 手动触发
   push:
     branches: [ main ]
     paths:
@@ -37,7 +37,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
-          autoconf automake libtool autoconf-archive \
+          autoconf automake libtool pkg-config \
+          autoconf-archive \
           libffi-dev libssl-dev git make p7zip-full curl zlib1g-dev
 
     - name: Install Buildozer and dependencies
@@ -53,21 +54,21 @@ jobs:
           echo "Created new buildozer.spec"
         fi
 
-        # 更新 NDK 配置
+        # 固定 NDK 版本
         if grep -q "android.ndk" buildozer.spec; then
           sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec
         else
           echo "android.ndk = ${{ env.NDK_VERSION }}" >> buildozer.spec
         fi
 
-        # 强制指定 ndk_path，避免 Buildozer 重复下载
+        # 指定 ndk_path
         if grep -q "android.ndk_path" buildozer.spec; then
           sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}|" buildozer.spec
         else
           echo "android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}" >> buildozer.spec
         fi
 
-        # 确保 16K 对齐参数存在
+        # 确保 16K 对齐
         if ! grep -q "android.extra_ldflags" buildozer.spec; then
           echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
         fi
