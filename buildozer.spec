@@ -5,14 +5,15 @@ package.domain = org.example
 source.dir = .
 version = 1.0
 
-requirements = python3==3.9, kivy, cython==0.29.36, libffi==3.4.4
+# 修正依赖版本
+requirements = python3, kivy, cython==0.29.36, libffi
 orientation = portrait
 fullscreen = 0
 
+# 修正API和NDK配置
 android.api = 31
 android.minapi = 21
-android.sdk=28
-android.ndk = 28.2.13676358
+android.ndk = 28c  # 使用简称而不是完整版本号
 android.ndk_api = 21
 android.archs = arm64-v8a
 android.use_precompiled = True
@@ -26,6 +27,9 @@ android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384
 
 source.include_exts = py,png,jpg,kv,ttf,otf,json,xml,ttc,woff,woff2
 source.include_dirs = fonts,images,data,assets
+
+# 移除android.sdk=28（这个配置不正确）
+# android.sdk = 28
 
 android.manifest = <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
