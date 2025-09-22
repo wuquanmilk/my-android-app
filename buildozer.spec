@@ -12,7 +12,7 @@ fullscreen = 0
 android.api = 31
 android.minapi = 21
 
-android.ndk = 28.2.10981533
+android.ndk = 28.2.13676358
 android.ndk_api = 21
 android.archs = arm64-v8a
 android.use_precompiled = True
