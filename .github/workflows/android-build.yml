@@ -14,6 +14,7 @@ env:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -37,21 +38,18 @@ jobs:
         pip install --upgrade buildozer
         pip install --upgrade Cython==0.29.36
 
-    - name: Initialize Buildozer
+    - name: Conditional Buildozer Initialization
       run: |
-        # 初始化Buildozer配置
-        buildozer init
-        # 检查生成的配置文件
-        if [ -f "buildozer.spec" ]; then
-        echo "buildozer.spec already exists, skipping initialization"
-         else
-         buildozer init
-         if [ $? -eq 0 ]; then
-         echo "Buildozer initialized successfully"
-         else
-         echo "Buildozer initialization failed"
-         exit 1
-         fi
+        # 只在 buildozer.spec 不存在时初始化
+        if [ ! -f "buildozer.spec" ]; then
+          echo "Initializing Buildozer..."
+          buildozer init
+          echo "Buildozer initialized successfully"
+        else
+          echo "buildozer.spec already exists, skipping initialization"
+          # 显示现有配置摘要
+          echo "Current buildozer.spec contents:"
+          head -20 buildozer.spec || true
         fi
 
     - name: Download Android NDK (with enhanced retry)
@@ -60,74 +58,42 @@ jobs:
         NDK_CACHE_PATH="$HOME/.buildozer/android/packages/ndk"
         mkdir -p $NDK_CACHE_PATH
         
-        # 尝试多个下载源
-        NDK_URLS=(
-          "https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-          "https://repo.huaweicloud.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        )
+        # 使用官方下载地址
+        NDK_URL="https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
         
-        for NDK_URL in "${NDK_URLS[@]}"; do
-          echo "Trying to download from: $NDK_URL"
-          if wget --tries=3 --timeout=120 -O "$NDK_CACHE_PATH/ndk.zip" "$NDK_URL"; then
-            echo "Successfully downloaded NDK from $NDK_URL"
+        # 增强的重试机制
+        for i in {1..5}; do
+          echo "Attempt $i to download NDK from $NDK_URL..."
+          if wget --tries=3 --timeout=120 -O "$NDK_ZIP_PATH" "$NDK_URL"; then
+            echo "NDK downloaded successfully!"
             # 解压NDK
-            unzip -q "$NDK_CACHE_PATH/ndk.zip" -d "$NDK_CACHE_PATH"
+            unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
             # 设置环境变量
             echo "ANDROID_NDK_HOME=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
             echo "PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}:$PATH" >> $GITHUB_ENV
             break
           else
-            echo "Failed to download from $NDK_URL"
-            rm -f "$NDK_CACHE_PATH/ndk.zip"
+            echo "Download attempt $i failed."
+            rm -f "$NDK_ZIP_PATH"
+            if [ $i -eq 5 ]; then
+              echo "All download attempts failed!"
+              exit 1
+            fi
+            sleep 30
           fi
         done
-        
-        # 验证NDK是否成功下载和解压
-        if [ ! -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
-          echo "Error: All NDK download attempts failed!"
-          exit 1
-        fi
-
-    - name: Setup Android SDK
-      run: |
-        # 创建Android SDK目录
-        mkdir -p android-sdk
-        
-        # 下载命令行工具
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-        unzip -q cmdline-tools.zip -d android-sdk/cmdline-tools
-        mv android-sdk/cmdline-tools/cmdline-tools android-sdk/cmdline-tools/latest
-        
-        # 设置环境变量
-        echo "ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$GITHUB_WORKSPACE/android-sdk/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
-        
-        # 接受许可协议
-        yes | sdkmanager --licenses
-        
-        # 安装必要的Android组件
-        sdkmanager "platforms;android-${{ env.ANDROID_API }}" \
-                   "build-tools;${{ env.BUILD_TOOLS }}" \
-                   "platform-tools"
 
     - name: Build with Buildozer
       run: |
-        # 设置Buildozer使用的NDK路径
+        # 设置构建环境
         export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/ndk/android-ndk-r${{ env.NDK_VERSION }}"
+        export PATH="$ANDROID_NDK_HOME:$PATH"
         
-        # 打印调试信息
+        # 显示环境信息（用于调试）
         echo "Current working directory: $(pwd)"
         echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
-        echo "ANDROID_HOME: $ANDROID_HOME"
         echo "PATH: $PATH"
-        
-        # 检查.buildozer目录结构
-        if [ -d ".buildozer" ]; then
-          echo ".buildozer directory exists"
-          find ".buildozer" -type d | head -20
-        else
-          echo ".buildozer directory does not exist"
-        fi
         
         # 执行构建
         buildozer -v android debug
