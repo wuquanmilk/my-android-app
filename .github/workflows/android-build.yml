@@ -53,7 +53,7 @@ jobs:
         mkdir -p ~/.buildozer/android/platform
 
         # 接受 Android SDK 许可证
-        echo -e "\n8933bad161af4178b1185极速加速器d1a37fbf41ea5269c55" > ~/.android/android-sdk-license
+        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/android-sdk-license
         echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" >> ~/.android/android-sdk-license
 
         # 下载并设置 NDK r25b
@@ -110,7 +110,7 @@ jobs:
 
     - name: Verify build output
       run: |
-        if ls bin/*.apk 1> /dev/null 2>&极速加速器1; then
+        if ls bin/*.apk 1> /dev/null 2>&1; then
           APK_FILE=$(ls bin/*.apk | head -1)
           echo "Build successful! APK file: $APK_FILE"
           echo "File size: $(du -h "$APK_FILE" | cut -f1)"
@@ -119,13 +119,13 @@ jobs:
         else
           echo "Error: No APK file found in bin/ directory!"
           exit 1
-       极速加速器 fi
+        fi
 
     - name: Upload APK artifact
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: android-ap极速加速器k
+        name: android-apk
         path: bin/*.apk
         retention-days: 7
 
