@@ -129,8 +129,38 @@ jobs:
         echo "NDK contents:"
         ls "$ANDROID_NDK_HOME" | head -10
         
-        # 执行构建
-        buildozer -v android debug
+        # 执行构建并捕获输出到日志文件
+        buildozer -v android debug 2>&1 | tee build_output.log
+
+    - name: Prepare logs for upload
+      if: always()
+      run: |
+        # 创建日志目录
+        mkdir -p logs
+        
+        # 复制所有可能的日志文件
+        if [ -d ".buildozer" ]; then
+          echo "Copying .buildozer logs..."
+          find .buildozer -name "*.log" -exec cp {} logs/ \;
+        else
+          echo ".buildozer directory not found"
+        fi
+        
+        # 复制构建输出日志
+        if [ -f "build_output.log" ]; then
+          echo "Copying build output log..."
+          cp build_output.log logs/
+        fi
+        
+        # 复制配置文件
+        if [ -f "buildozer.spec" ]; then
+          echo "Copying buildozer.spec..."
+          cp buildozer.spec logs/
+        fi
+        
+        # 显示准备上传的日志文件
+        echo "Logs prepared for upload:"
+        ls -la logs/ || true
 
     - name: Verify build output
       run: |
@@ -153,11 +183,10 @@ jobs:
         path: bin/*.apk
         retention-days: 7
 
-    - name: Upload build logs on failure
-      if: failure()
+    - name: Upload build logs
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs-${{ github.run_number }}
-        path: |
-          .buildozer/**/*.log
-          *.log
+        path: logs/
+        if-no-files-found: ignore
