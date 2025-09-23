@@ -6,7 +6,7 @@ source.dir = .
 version = 1.0
 
 # 修正依赖版本
-requirements = python3, kivy, cython==0.29.36, libffi
+requirements = python3, kivy, cython, libffi
 orientation = portrait
 fullscreen = 0
 
