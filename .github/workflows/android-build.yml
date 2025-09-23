@@ -1,7 +1,7 @@
 name: Android APK Build (NDK r28c + 16K Alignment)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 允许手动触发
   push:
     branches: [ main ]
     paths:
@@ -12,6 +12,7 @@ on:
 
 env:
   NDK_VERSION: "28c"
+  NDK_FULL_VERSION: "28.2.13676358"
   ANDROID_API: 31
   MIN_API: 21
   BUILD_TOOLS: "34.0.0"
@@ -20,7 +21,7 @@ env:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -31,84 +32,121 @@ jobs:
       with:
         python-version: '${{ env.PYTHON_VERSION }}'
 
-    - name: Install build dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
-          autoconf automake libtool pkg-config m4 \
-          autoconf-archive \
+          autoconf automake libtool autoconf-archive \
           libffi-dev libssl-dev git make p7zip-full curl zlib1g-dev
 
     - name: Install Buildozer and dependencies
       run: |
         pip install --upgrade pip setuptools wheel
         pip install --upgrade buildozer
-        pip install --upgrade Cython==0.29.36
+        pip install --upgrade Cython
+        pip install --upgrade pythonforandroid
 
     - name: Verify and update buildozer.spec
       run: |
-        if [ ! -f "buildozer.spec" ]; then buildozer init; fi
-        sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec || echo "android.ndk = ${{ env.NDK_VERSION }}" >> buildozer.spec
-        sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}|" buildozer.spec || echo "android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}" >> buildozer.spec
-        grep -q "android.extra_ldflags" buildozer.spec || echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
-
-    - name: Download Android NDK r28c
-      run: |
-        NDK_CACHE="$HOME/.buildozer/android/packages"
-        mkdir -p $NDK_CACHE
-        NDK_ZIP="$NDK_CACHE/ndk.zip"
-        NDK_URL="https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-
-        MAX_ATTEMPTS=5
-        for ((i=1;i<=MAX_ATTEMPTS;i++)); do
-          echo "Download attempt $i"
-          wget --tries=3 --retry-connrefused -O "$NDK_ZIP" "$NDK_URL"
-          unzip -tq "$NDK_ZIP" && break
-          echo "Download or zip test failed, retrying..."
-          rm -f "$NDK_ZIP"
-          sleep 10
-          if [ $i -eq $MAX_ATTEMPTS ]; then echo "NDK download failed"; exit 1; fi
-        done
-
-        unzip -qq "$NDK_ZIP" -d "$NDK_CACHE"
-        export ANDROID_NDK_HOME="$NDK_CACHE/android-ndk-r${{ env.NDK_VERSION }}"
-        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
-
-    - name: Patch libffi for Autoconf/Libtool
-      run: |
-        LIBFFI_DIR="$HOME/.buildozer/android/build/libffi"
-        if [ -d "$LIBFFI_DIR" ]; then
-          cd "$LIBFFI_DIR"
-          rm -rf configure config.cache config.log autom4te.cache
-          autoupdate || true
-          libtoolize --force --copy
-          aclocal -I m4
-          autoreconf -fi
-          echo "libffi patched successfully"
+        if [ ! -f "buildozer.spec" ]; then
+          buildozer init
+          echo "Created new buildozer.spec"
         fi
 
-    - name: Build APK with Buildozer
+        # 更新 NDK 配置
+        if grep -q "android.ndk" buildozer.spec; then
+          sed -i "s|android.ndk =.*|android.ndk = ${{ env.NDK_VERSION }}|" buildozer.spec
+        else
+          echo "android.ndk = ${{ env.NDK_VERSION }}" >> buildozer.spec
+        fi
+
+        # 强制指定 ndk_path，避免 Buildozer 重复下载
+        if grep -q "android.ndk_path" buildozer.spec; then
+          sed -i "s|android.ndk_path =.*|android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}|" buildozer.spec
+        else
+          echo "android.ndk_path = /home/runner/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}" >> buildozer.spec
+        fi
+
+        # 确保 16K 对齐
+        if ! grep -q "android.extra_ldflags" buildozer.spec; then
+          echo 'android.extra_ldflags = -Wl,-z,max-page-size=16384,-z,common-page-size=16384' >> buildozer.spec
+        fi
+
+        echo "Final buildozer.spec settings:"
+        grep -E "(android.ndk|android.ndk_path|android.extra_ldflags)" buildozer.spec || true
+
+    - name: Patch Autoconf macros
+      run: find . -name 'configure.ac' -execdir autoupdate \;
+
+    - name: Download Android NDK (Enhanced Reliability)
+      run: |
+        NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
+        mkdir -p $NDK_CACHE_PATH
+        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
+        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
+
+        echo "Downloading from reliable mirror: $NDK_URL"
+        MAX_ATTEMPTS=5
+        for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
+          echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
+          if curl -L --progress-bar --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
+            echo "Download completed. Verifying file integrity..."
+            if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
+              echo "ZIP file integrity verified. Extracting..."
+              unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
+              if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
+                echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
+                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+                break
+              else
+                echo "Error: Extraction succeeded but directory not found!"
+                rm -f "$NDK_ZIP_PATH"
+              fi
+            else
+              echo "Error: Downloaded ZIP file is corrupted or incomplete!"
+              rm -f "$NDK_ZIP_PATH"
+            fi
+          else
+            echo "Download attempt $attempt failed."
+            rm -f "$NDK_ZIP_PATH"
+          fi
+
+          if [ $attempt -lt $MAX_ATTEMPTS ]; then
+            echo "Waiting 30 seconds before next attempt..."
+            sleep 30
+          else
+            echo "Error: All $MAX_ATTEMPTS download attempts failed!"
+            exit 1
+          fi
+        done
+
+    - name: Build with Buildozer
       run: |
         export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
+        echo "Using NDK path: $ANDROID_NDK_HOME"
         buildozer -v android debug
 
     - name: Verify build output
       run: |
         if ls bin/*.apk 1> /dev/null 2>&1; then
           APK_FILE=$(ls bin/*.apk | head -1)
-          echo "Build successful: $APK_FILE"
+          echo "Build successful! APK file: $APK_FILE"
+          echo "File size: $(du -h "$APK_FILE" | cut -f1)"
         else
-          echo "No APK generated"; exit 1
+          echo "Error: No APK file found in bin/ directory!"
+          exit 1
         fi
 
-    - name: Prepare logs
+    - name: Prepare logs for analysis
       if: always()
       run: |
         mkdir -p build_logs
         find . -name "*.log" -exec cp {} build_logs/ \; 2>/dev/null || true
         cp buildozer.spec build_logs/ || true
+        echo "Logs prepared for upload:"
+        ls -la build_logs/ || true
 
     - name: Upload APK artifact
       if: success()
@@ -130,6 +168,7 @@ jobs:
     - name: Fallback - Direct p4a build
       if: failure()
       run: |
+        echo "=== Buildozer failed, trying direct python-for-android ==="
         export ANDROID_NDK_HOME="$HOME/.buildozer/android/packages/android-ndk-r${{ env.NDK_VERSION }}"
         export PATH="$ANDROID_NDK_HOME:$PATH"
         pip install python-for-android
@@ -141,8 +180,11 @@ jobs:
           --ndk-path "$ANDROID_NDK_HOME" \
           --debug
         if ls dist/*.apk 1> /dev/null 2>&1; then
+          APK_FILE=$(ls dist/*.apk | head -1)
+          echo "P4A build successful! APK file: $APK_FILE"
           mkdir -p bin
-          cp $(ls dist/*.apk | head -1) bin/
+          cp "$APK_FILE" bin/
         else
-          echo "Direct p4a build failed"; exit 1
+          echo "P4A build also failed!"
+          exit 1
         fi
