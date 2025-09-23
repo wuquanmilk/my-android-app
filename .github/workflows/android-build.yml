@@ -38,7 +38,7 @@ jobs:
         sudo apt-get install -y \
           wget unzip openjdk-17-jdk \
           autoconf automake libtool autoconf-archive \
-          libffi-dev libssl-dev git make p7zip-full curl zlib1g-dev
+          libffi-dev libssl-dev git make p7zip-full curl zlib1g-dev pkg-config
 
     - name: Install Buildozer and dependencies
       run: |
@@ -76,50 +76,19 @@ jobs:
         echo "Final buildozer.spec settings:"
         grep -E "(android.ndk|android.ndk_path|android.extra_ldflags)" buildozer.spec || true
 
+    - name: Download Android NDK
+      run: |
+        wget https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
+        unzip -q android-ndk-r28c-linux.zip -d $HOME/.buildozer/android/packages/
+
+    - name: Set NDK environment
+      run: |
+        export ANDROID_NDK_HOME=$HOME/.buildozer/android/packages/android-ndk-r28c
+        export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+        echo "NDK_HOME set to $ANDROID_NDK_HOME"
+
     - name: Patch Autoconf macros
       run: find . -name 'configure.ac' -execdir autoupdate \;
-
-    - name: Download Android NDK (Enhanced Reliability)
-      run: |
-        NDK_CACHE_PATH="$HOME/.buildozer/android/packages"
-        mkdir -p $NDK_CACHE_PATH
-        NDK_URL="https://googledownloads.cn/android/repository/android-ndk-r${{ env.NDK_VERSION }}-linux.zip"
-        NDK_ZIP_PATH="$NDK_CACHE_PATH/ndk.zip"
-
-        echo "Downloading from reliable mirror: $NDK_URL"
-        MAX_ATTEMPTS=5
-        for ((attempt=1; attempt<=$MAX_ATTEMPTS; attempt++)); do
-          echo "Attempt $attempt/$MAX_ATTEMPTS: Downloading NDK..."
-          if curl -L --progress-bar --retry 3 --retry-delay 10 --max-time 120 -o "$NDK_ZIP_PATH" "$NDK_URL"; then
-            echo "Download completed. Verifying file integrity..."
-            if unzip -tq "$NDK_ZIP_PATH" &>/dev/null; then
-              echo "ZIP file integrity verified. Extracting..."
-              unzip -q "$NDK_ZIP_PATH" -d "$NDK_CACHE_PATH"
-              if [ -d "$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" ]; then
-                echo "NDK ${{ env.NDK_VERSION }} successfully installed!"
-                echo "NDK_PATH=$NDK_CACHE_PATH/android-ndk-r${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-                break
-              else
-                echo "Error: Extraction succeeded but directory not found!"
-                rm -f "$NDK_ZIP_PATH"
-              fi
-            else
-              echo "Error: Downloaded ZIP file is corrupted or incomplete!"
-              rm -f "$NDK_ZIP_PATH"
-            fi
-          else
-            echo "Download attempt $attempt failed."
-            rm -f "$NDK_ZIP_PATH"
-          fi
-
-          if [ $attempt -lt $MAX_ATTEMPTS ]; then
-            echo "Waiting 30 seconds before next attempt..."
-            sleep 30
-          else
-            echo "Error: All $MAX_ATTEMPTS download attempts failed!"
-            exit 1
-          fi
-        done
 
     - name: Build with Buildozer
       run: |
